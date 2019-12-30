@@ -1,0 +1,497 @@
+---
+title: "Supplemental analyses for cortisol"
+author: "Michelle.VanTieghem"
+date: "May 12, 2019"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+
+## funtion for age breakpoint splitting
+b1 <- function(x, bp) ifelse(x < bp,x, bp)
+b2 <- function(x, bp) ifelse(x < bp, bp, x) 
+
+```
+
+functions needed for these analyses
+```{r, include = F, echo = F}
+
+######### lmer Version #######
+condslope.lmer.slopes <- function(x, z, c, y){
+#  condslope.lmer( "age1","GROUP", 0, Amyg_piecewise_orig)
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*z
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work. 
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[xz]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+coef4.var <- subset(modtidy, rownames == xz)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, xz])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 2), w1.slope=round(w1.slope, digits = 2),
+            df = subset(modtidy, rownames == x)$df,
+            t.val = round(t.val, digits = 2), p.val = round(p.val, digits = 3), 
+            lower95 = round(lower95, digits = 2), 
+            upper95 = round(upper95, digits = 2)))
+}
+
+
+condslope.lmer.pointestimates <- function(x, z, c, y){
+#  condslope.lmer( "age1","GROUP", 0, Amyg_piecewise_orig)
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*z
+  
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work. 
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[xz]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+coef4.var <- subset(modtidy, rownames == xz)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, xz])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 2), w1.slope=round(w1.slope, digits = 2),
+            df = subset(modtidy, rownames == x)$df,
+            t.val = round(t.val, digits = 2), p.val = round(p.val, digits = 3), 
+            lower95 = round(lower95, digits = 2), 
+            upper95 = round(upper95, digits = 2)))
+}
+
+
+```
+
+# load data 
+```{r}
+load("../../../data/1_cort_data/Cortisol_Ready_to_analyze.Rdata")
+
+# check this is full 240 N
+length(unique(cort_merge8$IDENT_SUBID))
+```
+
+## clean data
+```{r}
+# relabel time of day
+cort_merge8$time_of_day <- as.factor(with(cort_merge8,
+                                   ifelse(time_of_day == "waking", "Waking", "Evening")))
+
+summary(cort_merge8$time_of_day)
+
+# make some more centered variables
+cort_merge8$index_day.c <- as.numeric(as.character(cort_merge8$index_day))
+summary(cort_merge8$index_day.c)
+cort_merge8$meds.c <- as.numeric(as.character(cort_merge8$meds)) - mean(as.numeric(as.character(cort_merge8$meds)), na.rm = T)
+
+# simplifying name of cort stuff 
+cort_merge8$cort_use <- cort_merge8$cort_values_fixed_no_outliers 
+
+cort_merge8$corrected_cort_age_yrs.c <- cort_merge8$corrected_cort_age_yrs - mean(cort_merge8$corrected_cort_age_yrs, na.rm = T)
+
+# make a usable dataset
+data_use <- subset(cort_merge8, !is.na(cort_use) & 
+                                                  !is.na(batch.c) & !is.na(meds.c) & !is.na(index_wave.c) & !is.na(index_day.c))
+```
+
+
+## make summary dataset for plotting 
+this is so that we can plot the raw data, but plot means across both days instead of plotting 2 days per subj (per time of day, per wave...)
+```{r}
+cort_ave_days_m <- data_use %>%
+  group_by(IDENT_SUBID, index_wave, time_of_day) %>%
+  # this will provide average cort by each wave, and time of day...
+  #aka average across 2 days if that subject has 2 days of data!
+  dplyr::summarize(n_cort_samples = n(), 
+            cort_use = mean(cort_use, na.rm = T),
+            PDS_mean = mean(PDS_mean),
+            corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
+            GROUP.n = mean(GROUP.n), 
+            sex = mean(sex))
+nrow(cort_ave_days_m)
+cort_ave_days_m$GROUP <- as.factor(ifelse(cort_ave_days_m$GROUP.n == 0, "COMP", "PI"))
+
+```
+
+
+# 1) SEX EFFECTS 
+
+## set up data
+```{r}
+waking_cort_df <- data_use %>% 
+  filter(time_of_day == "Waking") %>%
+  mutate(sex.f = as.factor(sex))
+summary(waking_cort_df$sex.f)
+```
+
+## using the same breakpoint as orig waking model 
+```{r}
+load("../manuscript/model_output/waking_optimize_piecewise_breakpoint.Rdata")
+bp <- optimize_piecewise_bp[1]
+# center these ages on the bp
+# changing this so that age1 and age2 are centered at breakpoint.
+waking_cort_df$age1 <- b1(waking_cort_df$corrected_cort_age_yrs, bp) -bp 
+waking_cort_df$age2 <- b2(waking_cort_df$corrected_cort_age_yrs, bp) -bp
+```
+
+## how male PI data points > 13 (breakpoint): only 6! 
+cannot split sexes by age 13 so do not continue with piecewise 
+```{r}
+cort_sex_age_group_table <- waking_cort_df %>%
+  filter( index20.n == min_index20) %>%
+  mutate(age_group = ifelse(corrected_cort_age_yrs < 13, "age1", "age2")) %>%
+  group_by(GROUP, age_group, sex) %>%
+  dplyr::summarize(n=n())
+  
+cort_sex_age_group_table
+save(cort_sex_age_group_table, file = "tables/sex_breakdown_by_age_group.Rdata")
+```
+
+
+## linear sex x group: NS
+
+```{r}
+sex_waking_linear <- lmer(cort_use ~ 
+                           GROUP*sex.f + corrected_cort_age_yrs + sex.f + 
+                index_wave.c + index_day.c + batch.c + meds.c + 
+                     + (1 | IDENT_SUBID), 
+                      data = waking_cort_df)
+summary(sex_waking_linear)
+save(sex_waking_linear, file = "model_output/sexXgroup_waking_linear_model_results.Rdata")
+```
+
+
+## linear sex x AGE:  SIG.
+upshoot in cortisol is driven by FEMALES
+
+```{r}
+
+agexsex_waking_linear <- lmer(cort_use ~ 
+                           GROUP + corrected_cort_age_yrs.c*sex.f +
+                index_wave.c + index_day.c + batch.c + meds.c + 
+                     + (1 | IDENT_SUBID), 
+                      data = waking_cort_df)
+summary(agexsex_waking_linear)
+save(agexsex_waking_linear, file = "model_output/sexXage_waking_linear_model_results.Rdata")
+```
+
+### plot the effect
+```{r}
+plot(effect("corrected_cort_age_yrs.c:sex.f", agexsex_waking_linear))
+```
+
+### post-hoc of sex x age effects
+```{r}
+## GETTING SLOPES FOR AGE EFFECTS, PER GROUP
+male_slope_age <- data.frame(level = "male", condslope.lmer.slopes( "corrected_cort_age_yrs.c","sex.f1", 0, agexsex_waking_linear))
+female_slope_age <- data.frame(level =  "female", condslope.lmer.slopes("corrected_cort_age_yrs.c", "sex.f1", 1, agexsex_waking_linear))
+
+
+## GETTING SEX DIFF IN CORT AT DIFF AGES 
+agexsex_waking_linear <- lmer(cort_use ~ 
+                           GROUP + sex.f*corrected_cort_age_yrs.c +
+                index_wave.c + index_day.c + batch.c + meds.c + 
+                     + (1 | IDENT_SUBID), 
+                      data = waking_cort_df)
+age_mean <- mean(waking_cort_df$corrected_cort_age_yrs)
+age_sd <- sd(waking_cort_df$corrected_cort_age_yrs)
+
+sex_diff_adol <- data.frame(level =  as.character(round(age_sd + age_mean),2), condslope.lmer.pointestimates("sex.f1","corrected_cort_age_yrs.c", age_sd, agexsex_waking_linear))
+
+sex_diff_child <- data.frame(level = as.character(round(age_mean - age_sd),2), condslope.lmer.pointestimates( "sex.f1", "corrected_cort_age_yrs.c", -age_sd, agexsex_waking_linear))
+
+sex_waking_posthoc_slopes <- rbind(male_slope_age, female_slope_age, sex_diff_adol, sex_diff_child)
+
+sex_waking_posthoc_slopes <- sex_waking_posthoc_slopes %>%
+  dplyr::select(-w0.intercept)
+names(sex_waking_posthoc_slopes) <- c("GROUP", "Estimate", "df", "t.value", "p.value", "lower.95%.CI", "upper.95.CI%")
+sex_waking_posthoc_slopes
+save(sex_waking_posthoc_slopes, file = "model_output/sexXage_waking_linear_posthoc_age_slopes.Rdata")
+```
+
+# 2) Age of adoption (continuous, logged)
+
+## set up  variables, automatically excluding COMPS
+```{r}
+adopt_vars_cort_df <- waking_cort_df %>%
+  mutate(duration_adversity = IAI_7_AGEADOPT - IAI_3_AGEORPH) %>%
+  mutate(duration_split = as.factor(ifelse(duration_adversity > median(duration_adversity, na.rm = T), "later", "early"))) %>%
+           filter(GROUP == "PI")
+summary(adopt_vars_cort_df$GROUP)
+```
+
+## make wide df with 1 subject per row for descriptives and for plotting later
+```{r}
+#first you need to make a 1 row per subj df
+adopt_vars_wide <- adopt_vars_cort_df %>%
+  filter( GROUP == "PI") %>%
+  group_by(IDENT_SUBID) %>%
+  dplyr::summarize(IAI_3_AGEORPH = mean(IAI_3_AGEORPH, na.rm = T),
+           IAI_7_AGEADOPT = mean(IAI_7_AGEADOPT, na.rm = T),
+           duration_adversity = mean(duration_adversity, na.rm = T),
+           corrected_cort_age_yrs = mean(corrected_cort_age_yrs, na.rm = T),
+           cort_use = mean(cort_use, na.rm = T), 
+           sex = mean(DEM_3_GENDER_CHILD), 
+           batch = mean(batch)) %>%
+  mutate(age_adopt_log = log(IAI_7_AGEADOPT + 0.4),
+         age_adopt_sqrt = sqrt(IAI_7_AGEADOPT))
+nrow(adopt_vars_wide) # check this = # of unique subjects in df? yes
+length(unique(adopt_vars_wide$IDENT_SUBID))
+
+```
+
+## get descriptives
+```{r}
+adoption_waking_table <- adopt_vars_wide %>%
+  # issue is that this has multiple columns per subj. 
+  dplyr::summarize(mean_age_inst = mean(IAI_3_AGEORPH, na.rm = T),
+            sd_age_inst = sd(IAI_3_AGEORPH, na.rm = T), 
+            min_age_inst = min(IAI_3_AGEORPH, na.rm = T),
+            max_age_inst = max(IAI_3_AGEORPH, na.rm = T),
+            mean_age_adopt = mean(IAI_7_AGEADOPT, na.rm = T), 
+            sd_age_adopt = sd(IAI_7_AGEADOPT, na.rm = T), 
+            min_age_adopt = min(IAI_7_AGEADOPT, na.rm = T),
+            max_age_adopt = max(IAI_7_AGEADOPT, na.rm = T),
+            mean_duration = mean(duration_adversity, na.rm = T), 
+            sd_duration = sd(duration_adversity, na.rm = T), 
+            min_duration = min(duration_adversity, na.rm = T),
+            max_duration = max(duration_adversity, na.rm = T))
+
+adoption_waking_table
+save(adoption_waking_table, file = "tables/adoption_descriptives_table_cort_sample.Rdata")
+
+N_for_adoption_waking_table <- adopt_vars_wide %>%
+            dplyr::summarize (N = n(), 
+               has_age_inst = sum(!is.na(IAI_3_AGEORPH)),
+            has_age_adopt = sum(!is.na(IAI_7_AGEADOPT)),
+            has_duration = sum(!is.na(duration_adversity)),
+            missing_age_inst = sum(is.na(IAI_3_AGEORPH)),
+            missing_age_adopt = sum(is.na(IAI_7_AGEADOPT)),
+            missing_duration = sum(is.na(duration_adversity)))
+N_for_adoption_waking_table
+save(N_for_adoption_waking_table, file = "tables/adoption_N_missing_table_cort_sample.Rdata")
+```
+
+
+## correlations between adoption variables and age/sex
+relevant: age and batch are correlated.
+```{r}
+
+cor_table_adoption <- adopt_vars_wide %>%
+ dplyr:: select(IAI_3_AGEORPH, IAI_7_AGEADOPT,  duration_adversity, corrected_cort_age_yrs, sex, batch) %>%
+  na.omit(.) %>%
+  correlation
+cor_table_adoption_formatted <- summary(cor_table_adoption)
+cor_table_adoption_formatted 
+save(cor_table_adoption_formatted, file = "tables/adoption_corr_table_beautiful_formatting.Rdata")
+```
+
+
+## check age of placement: log transform
+```{r}
+hist(adopt_vars_cort_df$IAI_3_AGEORPH)
+
+#log-transforming... doesn't quite help but better
+
+shapiro.test(adopt_vars_cort_df$IAI_3_AGEORPH)
+shapiro.test(log(adopt_vars_cort_df$IAI_3_AGEORPH + 0.4))
+shapiro.test(sqrt(adopt_vars_cort_df$IAI_3_AGEORPH))
+
+# log transform, but change 0 to 0.4 so we don't have negative values.
+adopt_vars_cort_df$age_placed_log <- log(adopt_vars_cort_df$IAI_3_AGEORPH  + 1)
+hist(adopt_vars_cort_df$age_placed_log)
+
+adopt_vars_cort_df$age_placed_sqrt <- sqrt(adopt_vars_cort_df$IAI_3_AGEORPH )
+hist(adopt_vars_cort_df$age_placed_sqrt)
+```
+
+## check age of adoption: log transform
+```{r}
+hist(adopt_vars_cort_df$IAI_7_AGEADOPT)
+
+#log-transforming... doesn't quite help but better
+
+shapiro.test(adopt_vars_cort_df$IAI_7_AGEADOPT)
+shapiro.test(log(adopt_vars_cort_df$IAI_7_AGEADOPT))
+shapiro.test(sqrt(adopt_vars_cort_df$IAI_7_AGEADOPT))
+
+# log transform, but change 0 to 0.4 so we don't have negative values.
+adopt_vars_cort_df$age_adopt_log <- log(adopt_vars_cort_df$IAI_7_AGEADOPT + 1)
+hist(adopt_vars_cort_df$age_adopt_log)
+
+adopt_vars_cort_df$age_adopt_sqrt <- sqrt(adopt_vars_cort_df$IAI_7_AGEADOPT)
+hist(adopt_vars_cort_df$age_adopt_sqrt)
+```
+
+ identify extreme cases 
+there are no outliers after log-transformation! 
+```{r}
+
+# if the value is > 3 SD from the mean, then change value to 3SD from mean.
+adopt_vars_cort_df <- adopt_vars_cort_df %>%
+  mutate(age_adopt_log_outlier = ifelse(age_adopt_log > 3*sd(age_adopt_log, na.rm = T) + mean(age_adopt_log, na.rm = T),1,0))
+    #age_adopt_log_windsorized = ifelse(age_adopt_log_outlier == 1,
+     #                                       3*sd(age_adopt_log, na.rm = T) + mean(age_adopt_log, na.rm = T), age_adopt_log))
+
+summary(adopt_vars_cort_df$age_adopt_log_outlier)
+```
+
+## linear models with all data 
+### main effect of log age of adoption: TREND.
+```{r}
+logageadopt_linear_mod <- lmer(cort_use ~ 
+                          age_adopt_log + corrected_cort_age_yrs.c + 
+                           index_wave.c + index_day.c + batch.c + 
+                    meds.c + sex.centered + #age_placed_log 
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                      data = adopt_vars_cort_df)
+summary(logageadopt_linear_mod)
+
+save(logageadopt_linear_mod, file = "model_output/logageadopt_linear_model_results.Rdata")
+```
+
+### main effect of log age of adoption WITH age placed: NS. 
+```{r}
+logageadopt_logageplaced_linear_mod <- lmer(cort_use ~ 
+                          age_adopt_log + corrected_cort_age_yrs.c + 
+                           index_wave.c + index_day.c + batch.c + 
+                    meds.c + sex.centered + age_placed_log 
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                      data = adopt_vars_cort_df)
+summary(logageadopt_logageplaced_linear_mod)
+
+save(logageadopt_logageplaced_linear_mod, file = "model_output/logageadopt_logageplaced_linear_model_results.Rdata")
+```
+
+
+# 3) Testosterone
+using sex-normed testosterone, generated in 2A cleaning script. 
+```{r}
+waking_cort_df$testos_normed <- waking_cort_df$testos_cleaned_log_wave_ave_gender_normed
+waking_cort_df$testos_normed.c <- waking_cort_df$testos_normed- mean(waking_cort_df$testos_normed)
+```
+
+## descriptive info on testos:
+```{r}
+
+testos_df_by_subj <- waking_cort_df %>%
+  group_by(IDENT_SUBID, index_wave) %>%
+  dplyr::summarize(age = mean(corrected_cort_age_yrs), 
+            sex = mean(DEM_3_GENDER_CHILD),
+            testos_normed = mean(testos_normed, na.rm =T), 
+            GROUP.n = mean(GROUP.n))
+
+
+testos_demo <- testos_df_by_subj %>%
+      mutate(GROUP = ifelse(GROUP.n == 0, "COMP", "PI")) %>%
+    group_by(GROUP, index_wave) %>%
+    dplyr::summarize(
+              N_with_testos = sum(!is.na(testos_normed)),
+              N_missing_testos = sum(is.na(testos_normed)),
+              mean_age = mean(age[!is.na(testos_normed)]),
+              sd_age = sd(age[!is.na(testos_normed)]),
+              min_age = min(age[!is.na(testos_normed)]),
+              max_age = max(age[!is.na(testos_normed)]),
+              mean_testos = mean(testos_normed, na.rm = T),
+              sd_testos = sd(testos_normed, na.rm = T),
+              min_testos = min(testos_normed, na.rm = T),
+              max_testos = max(testos_normed, na.rm = T))
+testos_demo
+save(testos_demo, file = "tables/testos_subsample_waking_cort_demo.Rdata")
+
+```
+
+## linear main effect, without age: SIG
+```{r}
+testos_linear_waking <- lmer(cort_use ~ 
+                           GROUP + testos_normed + 
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c 
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                      data = waking_cort_df)
+summary(testos_linear_waking)
+save(testos_linear_waking, file = "model_output/testos_waking_linear_model_results.Rdata")
+```
+
+## linear main effect, with age: BOTH SIG 
+```{r}
+testos_age_linear_waking <- lmer(cort_use ~ 
+                           GROUP + testos_normed + corrected_cort_age_yrs.c +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c 
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                      data = waking_cort_df)
+summary(testos_age_linear_waking)
+save(testos_age_linear_waking, file = "model_output/testos_age_waking_linear_model_results.Rdata")
+```
+
+## testos x group without age: NS
+```{r}
+testosxgroup_linear_waking <- lmer(cort_use ~ 
+                           GROUP * testos_normed + 
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c 
+                     + (1 + index_wave.c | IDENT_SUBID), data = waking_cort_df)
+summary(testosxgroup_linear_waking)
+save(testosxgroup_linear_waking, file = "model_output/testosxgroup_waking_linear_model_results.Rdata")
+```
+
+
+## testos x group with age: NS
+```{r}
+testosxgroup_age_linear_waking <- lmer(cort_use ~ 
+                           GROUP * testos_normed + corrected_cort_age_yrs.c +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c 
+                     + (1 + index_wave.c | IDENT_SUBID), data = waking_cort_df)
+summary(testosxgroup_age_linear_waking)
+save(testosxgroup_age_linear_waking, file = "model_output/testosxgroup_age_waking_linear_model_results.Rdata")
+```
+
+
+## age x group with tests: NS
+so group x age effects are not significant when you control for testosterone...
+```{r}
+agexgroup_testos_linear_waking <- lmer(cort_use ~ 
+                           GROUP * corrected_cort_age_yrs.c +testos_normed + 
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c 
+                     + (1 + index_wave.c | IDENT_SUBID), data = waking_cort_df)
+summary(agexgroup_testos_linear_waking)
+save(agexgroup_testos_linear_waking, file = "model_output/agexgroup_testos_waking_linear_model_results.Rdata")
+```

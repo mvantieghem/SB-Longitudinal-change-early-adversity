@@ -1,0 +1,118 @@
+---
+title: "Calculating age intervals for longitudinal cortisol"
+author: "Michelle VanTieghem"
+date: "January 23, 2018"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# updated june 2018:
+make sure you're using corrected_cort_age_yrs and cort_values_fixed 
+
+
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+
+# Load the data 
+```{r, include = F}
+load(file= "../../../data/1_cort_data/1A_Long_cort_removed_outliers.Rdata")
+
+nrow(cort_cleaned.no.outliers)
+names(cort_cleaned.no.outliers)
+```
+
+# set up all of these variables o be in the right format! 
+```{r}
+cort_cleaned.no.outliers$GROUP <- as.factor(cort_cleaned.no.outliers$GROUP.x)
+cort_cleaned.no.outliers$index_wave <- as.factor(cort_cleaned.no.outliers$index_wave)
+# make this effect coded! 
+cort_cleaned.no.outliers$index_day <- as.factor(ifelse(cort_cleaned.no.outliers$index_day == 1, -1, 1))
+
+      
+# make this a factor! 
+cort_cleaned.no.outliers$time_of_day <- as.factor(ifelse(cort_cleaned.no.outliers$index4 == 1 | cort_cleaned.no.outliers$index4 == 2, "waking","evening"))
+
+cort_cleaned.no.outliers$gender.centered <- cort_cleaned.no.outliers$DEM_3_GENDER_CHILD - mean(cort_cleaned.no.outliers$DEM_3_GENDER_CHILD, na.rm = TRUE)
+```
+
+## making an index2 variable, which will average over the morning samples and evening samples to give a single slope for each subject. 
+```{r}
+cort_cleaned.no.outliers$index3.f <- as.factor(ifelse(cort_cleaned.no.outliers$index4 == 1 | cort_cleaned.no.outliers$index4 == 2, "waking", ifelse(cort_cleaned.no.outliers$index4 == 3, "afternoon", "evening")))
+
+cort_cleaned.no.outliers$index2.f <- as.factor(ifelse(cort_cleaned.no.outliers$index4 == 1 | cort_cleaned.no.outliers$index4 == 2, "waking",  "evening"))
+
+```
+
+## check ages and fill in NAs with session age. 
+```{r}
+# not all ages are fixed, because some just need to be session. 
+sum(is.na(cort_cleaned.no.outliers$corrected_cort_age_yrs))
+
+cort_cleaned.no.outliers$corrected_cort_age_yrs <- with(cort_cleaned.no.outliers, ifelse(
+  is.na(corrected_cort_age_yrs), corrected_session_age_yrs, corrected_cort_age_yrs))
+# check they are all fixed! 
+sum(is.na(cort_cleaned.no.outliers$corrected_cort_age_yrs))
+
+hist(cort_cleaned.no.outliers$corrected_cort_age_yrs)
+
+cort_cleaned.no.outliers$age.centered <- cort_cleaned.no.outliers$corrected_cort_age_yrs - mean(cort_cleaned.no.outliers$corrected_cort_age_yrs, na.rm = TRUE)
+
+range(cort_cleaned.no.outliers$corrected_cort_age_yrs)
+```
+
+
+
+## make a variable calculating age-intervals between waves 
+super slow function, but it works!
+```{r}
+cort_cleaned.no.outliers$cort_age_wave1 <- NA 
+cort_cleaned.no.outliers$cort_age_wave2 <- NA
+cort_cleaned.no.outliers$cort_age_wave3 <- NA
+for (i in 1:nrow(cort_cleaned.no.outliers)){
+  n <- cort_cleaned.no.outliers$IDENT_SUBID[i]
+  subset <- subset(cort_cleaned.no.outliers, IDENT_SUBID == n)
+  if (1 %in% subset$index_wave){
+    cort_cleaned.no.outliers$cort_age_wave1[cort_cleaned.no.outliers$IDENT_SUBID == n] <- subset$corrected_cort_age_yrs[subset$index_wave == 1][1]
+  }
+  if (2 %in% subset$index_wave){
+    cort_cleaned.no.outliers$cort_age_wave2[cort_cleaned.no.outliers$IDENT_SUBID == n]<- subset$corrected_cort_age_yrs[subset$index_wave == 2][1]
+  } 
+  if (3 %in% subset$index_wave){
+    cort_cleaned.no.outliers$cort_age_wave3[cort_cleaned.no.outliers$IDENT_SUBID == n] <- subset$corrected_cort_age_yrs[subset$index_wave == 3][1]
+  } 
+}
+
+tail(cort_cleaned.no.outliers$cort_age_wave3) 
+```
+
+## now calculate age intervals
+```{r}
+cort_cleaned.no.outliers$age_intervals <- ifelse(cort_cleaned.no.outliers$index_wave == 3 & !is.na(cort_cleaned.no.outliers$cort_age_wave1), (cort_cleaned.no.outliers$cort_age_wave3 - cort_cleaned.no.outliers$cort_age_wave1), 
+                           ifelse(cort_cleaned.no.outliers$index_wave == 3 & !is.na(cort_cleaned.no.outliers$cort_age_wave2), (cort_cleaned.no.outliers$cort_age_wave3 - cort_cleaned.no.outliers$cort_age_wave2),
+                             ifelse(cort_cleaned.no.outliers$index_wave == 3 & is.na(cort_cleaned.no.outliers$cort_age_wave2) & is.na(cort_cleaned.no.outliers$cort_age_wave1), 0,
+                            ifelse(cort_cleaned.no.outliers$index_wave == 2 & !is.na (cort_cleaned.no.outliers$cort_age_wave1), 
+                       (cort_cleaned.no.outliers$cort_age_wave2 - cort_cleaned.no.outliers$cort_age_wave1),
+                       ifelse(cort_cleaned.no.outliers$index_wave == 2 & is.na (cort_cleaned.no.outliers$cort_age_wave1), 
+                       0,  0)))))
+
+summary(cort_cleaned.no.outliers$age_intervals)
+
+```
+
+## save the new age_intervals variable to the dataframe object for future!
+```{r}
+
+save(cort_cleaned.no.outliers, file= "../../../data/1_cort_data/1B_Long_cort_added_age_intervals.Rdata")
+nrow(cort_cleaned.no.outliers)
+
+```

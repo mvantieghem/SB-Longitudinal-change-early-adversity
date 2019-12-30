@@ -1,0 +1,297 @@
+---
+title: "getting data ready for longitudinal cort analysis"
+author: "Michelle.VanTieghem"
+date: "March 27, 2018"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+# Notes
+feb 18 - updating to include comps > 19 since there are only 3 subjects over that age limit. 
+
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+
+```{r, warnings = F, message = F}
+
+load(file = "../../../data/1_cort_data/1D_long_cort_testos_cleaned.Rdata")
+
+nrow(cort_merge8)
+sum(is.na(cort_merge8$batch))
+sum(is.na(cort_merge8$cort_values_fixed_no_outliers))
+
+summary(cort_merge8$batch) # make sure this exists! added in prior step with testosterone. 
+```
+
+## include/ exclude - double check age ranges for comps
+```{r, warnings = F}
+# check that comp age range is 4+ and PI keeping the 3.9 
+cort_merge8 %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(min_age = min(corrected_cort_age_yrs, na.rm = T), 
+            max_age = max(corrected_cort_age_yrs, na.rm = T))
+
+```
+
+```{r}
+nrow(cort_merge8)
+# not excluding for now.
+sum(is.na(cort_merge8$person.centered.time))
+### REMOVE HIGH CORT COMP 
+cort_merge8 <- subset(cort_merge8, cort_values_fixed_no_outliers < 75)
+```
+
+*TEST AGE SUBSET ERROR*
+```{r}
+#cort_merge8 <- cort_merge8 %>%
+  # these rows were accidentally excluded before
+  #mutate(exclude = ifelse(GROUP == "COMP" & is.na(cort_age_wave1), 1, 0))
+
+#cort_merge8 <- cort_merge8 %>%
+ # filter(exclude == 0)
+# check groups 
+
+#nrow(cort_merge8)
+```
+
+## fixing variables 
+```{r, warnings = F}
+# these need to be re-leveled so that waking = first 
+cort_merge8$index3.f <- factor(cort_merge8$index3.f, 
+                            levels = c("waking", "afternoon","evening"))
+# order the levels!!! 
+cort_merge8$time_of_day <- factor(cort_merge8$time_of_day,levels = c("waking", "evening"))
+# code this so wave 1 = 0 and then all positive nums are change 
+cort_merge8$wave_num <- as.numeric(ifelse(cort_merge8$index_wave == 1, 0, 
+                                       ifelse(cort_merge8$index_wave == 2, 2, 4)))
+sublist <- (unique(cort_merge8$IDENT_SUBID)) 
+length(sublist)
+# need to choose to one and stick to it! 
+#more about waking or slope? 
+#names(cort_merge8)[grepl("RCADS", names(cort_merge8))]
+nrow(cort_merge8)
+# fix gender variable
+cort_merge8$sex <- (cort_merge8$DEM_3_GENDER_CHILD)
+```
+
+## get info on dataset of cort sampling 
+```{r, warnings = F}
+# table for subjects with cort 
+table <-cort_merge8 %>% 
+    group_by(GROUP, index_wave, index_day, index4, time_of_day) %>% 
+  # sort data by group and wave 
+        dplyr::summarize(N= n(), 
+                   mean_PDS = mean(PDS_mean, na.rm = T),
+                   mean_age = mean(corrected_cort_age_yrs, na.rm = TRUE),  
+                   min_age = min(corrected_cort_age_yrs, na.rm = TRUE), 
+                              max_age = max(corrected_cort_age_yrs, na.rm = TRUE),
+                   prop_female = mean(sex, na.rm = TRUE))
+  
+table
+```
+
+## plot age across waves for each group 
+```{r}
+# get min age for each subject. 
+min_age <- cort_merge8 %>%
+  group_by(IDENT_SUBID) %>%
+ dplyr:: summarize(min_age = min(corrected_cort_age_yrs))
+for (i in 1:nrow(cort_merge8)){
+  sub <-cort_merge8$IDENT_SUBID[i]
+  cort_merge8$min_age[i] <- min_age$min_age[min_age$IDENT_SUBID== sub]
+}
+```
+
+```{r}
+AgebyParticipant_Cort <-ggplot(cort_merge8,
+                         aes(colour=GROUP,
+                             y=fct_reorder(IDENT_SUBID, min_age), x=corrected_cort_age_yrs))+
+  geom_line(aes(group = IDENT_SUBID), size=0.5, alpha = 0.5) + 
+  ylab("Participants") + xlab("Age") +
+  geom_point(size=1,  alpha = 0.2) + 
+  theme_classic() + my_colors + facet_grid (~ GROUP) +
+  theme(axis.line = element_line(colour = "black"),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position="none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) + 
+   scale_x_continuous(breaks = seq(4,21, by = 3), limits=c(4, 21)) 
+pdf(file = "figures/Manuscript_Figure1_AgebyParticipant_cort.pdf", width = 6, height =4)
+AgebyParticipant_Cort
+dev.off()
+#AgebyParticipant_Cort
+```
+
+
+
+
+
+## create a separate raw df for plotting that averages across DAYS.
+```{r}
+summary(cort_merge8$GROUP)
+cort_merge8$GROUP.n <- with(cort_merge8, ifelse(GROUP == "PI", 1, 0))
+summary(as.factor(cort_merge8$GROUP.n))
+cort_ave_days_m <- cort_merge8 %>%
+  group_by(IDENT_SUBID, index_wave, time_of_day) %>%
+  # this will provide average cort by each wave, and time of day...
+  #aka average across 2 days if that subject has 2 days of data!
+  dplyr::summarize(n_cort_samples = n(), 
+            cort_values_fixed_no_outliers = mean(cort_values_fixed_no_outliers),
+            PDS_mean = mean(PDS_mean),
+            corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
+            GROUP.n = mean(GROUP.n), 
+            sex = mean(sex))
+nrow(cort_ave_days_m)
+cort_ave_days_m$GROUP <- as.factor(ifelse(cort_ave_days_m$GROUP.n == 0, "COMP", "PI"))
+summary(cort_ave_days_m$GROUP)
+```
+
+## how many subjects are missing time points of data?
+```{r}
+cort_count_m<- cort_merge8 %>%
+  group_by(IDENT_SUBID, index_wave,  index_day) %>%
+  # this will provide average cort by each wave, and time of day...
+  #aka average across 2 days if that subject has 2 days of data!
+  dplyr::summarize(n_cort_samples = n(), 
+            corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
+            GROUP = mean(GROUP.n), 
+            sex = mean(sex))
+nrow(cort_count_m)
+# per day, how many cort samples collected? 
+summary(cort_count_m$n_cort_samples)
+check <- subset(cort_count_m, n_cort_samples <= 3)
+nrow(check)
+length(unique(check$IDENT_SUBID))
+summary(as.factor(cort_count_m$GROUP))
+```
+
+# BASIC DEMOGRAPHICS ON THESE SUBS. 
+## by subject
+```{r}
+library(readr)
+# also get min index20 for each subject 
+cort_merge8$index20.n <- parse_number(cort_merge8$index20)
+# get min age for each subject. 
+cort_merge8$min_index20 <- NA
+min_index20_df <- cort_merge8 %>%
+  group_by(IDENT_SUBID) %>%
+ dplyr:: summarize(min_index20 = min(index20.n, na.rm = T))
+head(min_index20_df)
+for (i in 1:nrow(cort_merge8)){
+  sub <- cort_merge8$IDENT_SUBID[i]
+ # print(sub)
+  cort_merge8$min_index20[i] <- min_index20_df$min_index20[min_index20_df$IDENT_SUBID== sub]
+}
+head(cort_merge8$index20.n)
+head(cort_merge8$min_index20)
+Cortisol_demographic_table <- cort_merge8 %>% 
+  # get only 1 row per subj
+  filter((corrected_cort_age_yrs == min_age) & (index20.n == min_index20)) %>%
+  # filter by group
+  group_by(GROUP) %>%
+  # get basic demo info 
+  dplyr::summarize(n = n(), 
+          mean_age_wave1 = round(mean(corrected_cort_age_yrs, na.rm = T), 2),
+            min_age_wave1 = round(min(corrected_cort_age_yrs), 2),
+            max_age_wave1 =round(max(corrected_cort_age_yrs), 2),
+            proportion_female = round(mean(sex), 2), 
+          N_female = sum(sex))
+Cortisol_demographic_table
+save(Cortisol_demographic_table, file = "tables/Cortisol_demographic_table.Rdata")
+```
+
+## adoption specific demo
+```{r}
+# merge in adoption demographics from master. 
+master <- read.csv("../../../data/master/J.Data_Entry_Master_8_17_2017_fixed_fixed.csv")
+adopt_var <- master[grepl("IAI_", names(master))]
+adopt_df <- cbind(master$IDENT_SUBID, adopt_var)
+head(adopt_df)
+names(adopt_df)[1] <- "IDENT_SUBID"
+summary(cort_merge8$GROUP.n)
+cort_merge8 <- merge(cort_merge8, adopt_df, by = "IDENT_SUBID")
+summary(cort_merge8$GROUP.n)
+# PI only demo 
+PI_adopt_vars <- cort_merge8 %>%
+  filter(corrected_cort_age_yrs == min_age & GROUP == "PI") %>% 
+  dplyr::summarize(median_age_orph = median(IAI_3_AGEORPH, na.rm = T), 
+            mean_age_orph = mean(IAI_3_AGEORPH, na.rm = T), 
+            min_age_orph = min(IAI_3_AGEORPH, na.rm = T),
+            max_age_orph = max (IAI_3_AGEORPH, na.rm = T),
+            median_age_adopt = median(IAI_7_AGEADOPT, na.rm = T),
+            mean_age_adopt = mean(IAI_7_AGEADOPT, na.rm = T),
+           min_age_adopt = min(IAI_7_AGEADOPT, na.rm = T),
+           max_age_adopt = max(IAI_7_AGEADOPT, na.rm = T))
+#PI_adopt_vars
+write.csv(PI_adopt_vars, "tables/PI_adopt_vars_in_Cortisol_Sample.Rdata")
+```
+
+## by wave
+```{r}
+cort_ave_days_m_time <- cort_merge8 %>%
+  group_by(IDENT_SUBID, index_wave) %>%
+  # this will provide average cort by each wave, and time of day...
+  #aka average across 2 days if that subject has 2 days of data!
+  dplyr::summarize(cort_values_fixed_no_outliers = mean(cort_values_fixed_no_outliers),
+            PDS_mean = mean(PDS_mean),
+            corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
+            GROUP.n = mean(GROUP.n), 
+            sex = mean(sex))
+summary(as.factor(cort_merge8$GROUP))
+summary(as.factor(cort_ave_days_m_time$GROUP.n))
+nrow(cort_ave_days_m_time)
+test <- subset(cort_ave_days_m_time, IDENT_SUBID == "SB330")
+nrow(test)
+cort_ave_days_m_time$GROUP <- as.factor(ifelse(cort_ave_days_m_time$GROUP.n == 0, "COMP", "PI"))
+summary(cort_ave_days_m_time$GROUP)
+cortisol_demo_table_by_wave <- cort_ave_days_m_time %>%
+  group_by( GROUP, index_wave) %>%
+  dplyr::summarize(N = n(),
+            mean_age = round(mean(corrected_cort_age_yrs, na.rm = T), 2),
+            sd_age = round(sd(corrected_cort_age_yrs, na.rm = T), 2),
+            min_age = round(min(corrected_cort_age_yrs), 2),
+            max_age=round(max(corrected_cort_age_yrs), 2),
+            proportion_female = round(mean(sex), 2), 
+            N_female = sum(sex))
+cortisol_demo_table_by_wave
+save(cortisol_demo_table_by_wave, file = "tables/Cortisol_demographic_table_by_wave.Rdata")
+cort_ave_days_m$sex <- as.factor(ifelse(cort_ave_days_m$sex == 0, "male", "female"))
+```
+
+# plot raw data
+raw data plot with loess line smoothing
+```{r, warnings = F}
+ggplot(cort_ave_days_m, aes(x = corrected_cort_age_yrs, y = cort_values_fixed_no_outliers, 
+                     color = as.factor(GROUP))) + facet_grid (~ time_of_day) + 
+  geom_point (alpha = 0.5, size = 0.5) + 
+  ylab ("Raw cortisol values (averaged across days)") +
+ geom_line(aes(group = IDENT_SUBID), alpha = 0.5, size = 0.5) + 
+  geom_smooth() + theme_classic() +   my_colors 
+```
+
+### make centered vars
+```{r}
+cort_merge8$sex.centered <- cort_merge8$sex- mean(cort_merge8$sex)
+cort_merge8$index_wave.c <- as.numeric(with(cort_merge8, ifelse(index_wave == 1, -1, ifelse(index_wave == 2, 0, 3))))
+cort_merge8$index_day.c <- as.numeric(cort_merge8$index_day)
+cort_merge8$batch.c <-as.numeric(as.character(cort_merge8$batch)) -  mean(as.numeric(as.character(cort_merge8$batch)), na.rm = T)
+nrow(cort_merge8)
+length(unique(cort_merge8$IDENT_SUBID))
+```
+
+## save this data 
+```{r}
+save(cort_merge8, file = "../../../data/1_cort_data/Cortisol_Ready_to_analyze.Rdata")
+```

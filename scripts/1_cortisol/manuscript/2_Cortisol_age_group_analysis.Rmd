@@ -1,0 +1,644 @@
+---
+title: "longitudinal cort analysis"
+author: "Michelle.VanTieghem"
+date: "March 27, 2018"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  word_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+
+# make specialized functions for this analysis used later.
+```{r, include = F, echo = F}
+
+b1 <- function(x, bp) ifelse(x < bp,x, bp)
+b2 <- function(x, bp) ifelse(x < bp, bp, x) 
+
+######### lmer Version #######
+condslope.lmer.slopes <- function(x, z, c, y){
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*z
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work. 
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+zx <- paste(z, x, sep = ":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[zx]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+coef4.var <- subset(modtidy, rownames == zx)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, zx])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 5), w1.slope=round(w1.slope, digits = 5),
+            df = subset(modtidy, rownames == x)$df,
+            t.val = round(t.val, digits = 5), p.val = round(p.val, digits = 4), 
+            lower95 = round(lower95, digits = 5), 
+            upper95 = round(upper95, digits = 5)))
+}
+
+condslope.lmer.pointestimates <- function(x, z, c, y){
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*z
+  
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work. 
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[xz]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+coef4.var <- subset(modtidy, rownames == xz)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, xz])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 5), w1.slope=round(w1.slope, digits = 5),
+            df = subset(modtidy, rownames == x)$df,
+            t.val = round(t.val, digits = 5), p.val = round(p.val, digits = 5), 
+            lower95 = round(lower95, digits = 5), 
+            upper95 = round(upper95, digits = 5)))
+}
+
+
+```
+
+# load data and organize
+```{r}
+load("../../../data/1_cort_data/Cortisol_Ready_to_analyze.Rdata")
+
+range(cort_merge8$corrected_cort_age_yrs)
+
+cort_merge8$time_of_day <- as.factor(with(cort_merge8,
+                                   ifelse(time_of_day == "waking", "Waking", "Evening")))
+
+summary(cort_merge8$time_of_day)
+
+cort_merge8$index_day.c <- as.numeric(as.character(cort_merge8$index_day))
+cort_merge8$meds.c <- as.numeric(as.character(cort_merge8$meds)) - mean(as.numeric(as.character(cort_merge8$meds)), na.rm = T)
+sum(is.na(cort_merge8$batch))
+sum(is.na(cort_merge8$cort_use))
+
+# simplifying name of cort stuff 
+cort_merge8$cort_use <- cort_merge8$cort_values_fixed_no_outliers 
+data_use <- subset(cort_merge8, !is.na(cort_use) & 
+                                                  !is.na(batch.c) & !is.na(meds.c) & !is.na(index_wave.c) & !is.na(index_day.c))
+```
+
+### make this extra summary dataset
+this is so that we can plot the raw data, but plot means across both days instead of plotting 2 days per subj (per time of day, per wave...)
+```{r}
+cort_ave_days_m <- data_use %>%
+  group_by(IDENT_SUBID, index_wave, time_of_day) %>%
+  # this will provide average cort by each wave, and time of day...
+  #aka average across 2 days if that subject has 2 days of data!
+  dplyr::summarize(n_cort_samples = n(), 
+            cort_use = mean(cort_use, na.rm = T),
+            PDS_mean = mean(PDS_mean),
+            corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
+            GROUP.n = mean(GROUP.n), 
+            sex.centered = mean(sex.centered), 
+            meds.c = mean(meds.c),
+            batch.c = mean(batch.c), 
+            index_wave.c = mean(index_wave.c))
+
+head(cort_ave_days_m)
+cort_ave_days_m$GROUP <- as.factor(ifelse(cort_ave_days_m$GROUP.n == 0, "COMP", "PI"))
+```
+
+
+# waking + evening omnibus model 
+## 1) Linear 
+
+```{r}
+
+lmer_linear <- lmer(cort_use ~ 
+                           GROUP *time_of_day* corrected_cort_age_yrs  +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c +
+                      (1 + index_wave.c | IDENT_SUBID), 
+                   data = data_use)
+summary(lmer_linear)
+save(lmer_linear, file= "model_output/full_cort_linear_model.Rdata")
+
+```
+
+
+## 2 ) Quadratic
+
+make age squared variable
+```{r, warnings = F}
+data_use$age_squared <- data_use$corrected_cort_age_yrs ^2 
+```
+
+
+group x age_squared x time of day is significant!! 
+```{r, warnings = F}
+lmer_quad_nested <- lmer(cort_use ~ 
+                           GROUP * time_of_day*age_squared + 
+                           GROUP * time_of_day *corrected_cort_age_yrs +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c +
+                      (1 + index_wave.c | IDENT_SUBID), data = data_use)
+summary(lmer_quad_nested)
+cort_quadratic_model <- anova(lmer_quad_nested)
+save(lmer_quad_nested, file = "model_output/full_cort_quadratic_model.Rdata")
+
+```
+
+## 3) Piecewise ORIGINAL VERSION
+
+### Info:
+Another approach would be to wrap the call to lmer in a function that is passed the breakpoint as a parameter, then minimize the deviance of the fitted model conditional upon the breakpoint using optimize. This maximizes the profile log likelihood for the breakpoint, and, in general (i.e., not just for this problem) if the function interior to the wrapper (lmer in this case) finds maximum likelihood estimates conditional upon the parameter passed to it, the whole procedure finds the joint maximum likelihood estimates for all the parameters.\
+
+Reference: https://stats.stackexchange.com/questions/19772/estimating-the-break-point-in-a-broken-stick-piecewise-linear-model
+
+### run optimizaton of breakpoint
+notes: does work with time_of_day as a random slope, but does NOT work when using index_wave as a random slope.\ allowing age slopes to vary in both groups. \
+
+```{r, warnings = F, message = F}
+
+bp = min(data_use$corrected_cort_age_yrs) # starting point for breakpoint.
+
+# Wrapper for Mixed effects model with variable break point
+run_models <- function(bp){
+  # this is the formula for your model 
+  mod <- lmer(cort_use ~ 
+                GROUP*b1(corrected_cort_age_yrs, bp)*time_of_day  +
+                GROUP*b2(corrected_cort_age_yrs, bp)*time_of_day + batch.c +
+         sex.centered + meds.c + index_wave.c + index_day.c +
+                # do i have enough data for time of day to be included??!
+                (1 + index_wave.c | IDENT_SUBID), data = data_use)
+  deviance(mod, REML = F) # you're minimizing this, i think.
+}
+
+# set the range of breakpoints you'd allow. 
+search.range <- c(min(data_use$corrected_cort_age_yrs)+
+                    1,max(data_use$corrected_cort_age_yrs)-1)
+# find the optimal model  based on breakpoint. 
+mod.opt <- optimize(run_models, interval = search.range)
+bp <- mod.opt$minimum # 
+
+# get a confidence interval of your break point. 
+CI.bp <- function(bp, tgt)
+{
+  run_models(bp) - tgt
+}
+# get info for confidence interval for break point! 
+tgt <- mod.opt$objective + qchisq(0.95,1)
+lb95 <- uniroot(CI.bp, lower=search.range[1], upper=bp, tgt=tgt)
+ub95 <- uniroot(CI.bp, lower=bp, upper=search.range[2], tgt=tgt)
+bp_lower <-lb95$root
+bp_upper <- ub95$root
+# save the result
+optimize_piecewise_bp <- cbind(bp, bp_lower, bp_upper)
+save(optimize_piecewise_bp, file = "model_output/cort_optimize_piecewise_breakpoint.Rdata")
+```
+
+optimal breakpoint is `r bp` with `bp_lower` and `bp_higher` 
+
+### now rerun model with optimal age inflection
+```{r}
+# make sure that Waking is baseline level for time of day.
+data_use$time_of_day <- factor(data_use$time_of_day, levels = c("Waking", "Evening"))
+summary(data_use$time_of_day)
+# changing this so that age1 and age2 are centered at breakpoint.
+data_use$age1 <- b1(data_use$corrected_cort_age_yrs, bp) -bp 
+data_use$age2 <- b2(data_use$corrected_cort_age_yrs, bp) -bp
+
+piecewise_mod_waking_ref <- lmer(cort_use ~ 
+                       GROUP*age1*time_of_day  +
+                GROUP*age2*time_of_day + batch.c  + 
+        sex.centered + meds.c + index_wave.c + index_day.c +
+                (1 + index_wave.c | IDENT_SUBID), data = data_use)
+
+# save main model ooutput
+cort_piecewise_regular_model <-piecewise_mod_waking_ref
+summary(cort_piecewise_regular_model)
+save(cort_piecewise_regular_model, file = "model_output/full_cort_piecewise_regular_model.Rdata")
+
+```
+
+
+# WAKING ONLY 
+
+```{r}
+# subset data for only waking cortisol.
+waking_cort_df <- subset(data_use, time_of_day == "Waking")
+
+```
+
+## 1) linear
+```{r}
+
+lmer_linear_waking <- lmer(cort_use ~ 
+                           GROUP * corrected_cort_age_yrs +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c 
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                   data = waking_cort_df)
+summary(lmer_linear_waking)
+save(lmer_linear_waking, file= "model_output/waking_cort_linear_model.Rdata")
+```
+
+
+
+## 2) Quadratic 
+```{r}
+waking_cort_df$age_squared  <- waking_cort_df$corrected_cort_age_yrs^2
+lmer_quadratic_waking <- lmer(cort_use ~ 
+                           GROUP * age_squared + GROUP*corrected_cort_age_yrs + 
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c 
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                   data = waking_cort_df)
+summary(lmer_quadratic_waking)
+save(lmer_quadratic_waking, file= "model_output/waking_cort_quadratic_model.Rdata")
+```
+
+## 3) Piecewise both groups vary 
+
+### re-do breakpoint for confirmation! 
+```{r, warnings = F}
+
+bp = min(data_use$corrected_cort_age_yrs) # starting point for breakpoint.
+
+# Wrapper for Mixed effects model with variable break point
+run_models <- function(bp){
+  # this is the formula for your model 
+  mod <- lmer(cort_use ~ 
+                GROUP*b1(corrected_cort_age_yrs, bp)  +
+                GROUP*b2(corrected_cort_age_yrs, bp) + batch.c +
+         sex.centered + meds.c + index_wave.c + index_day.c +
+                (1 + index_wave.c | IDENT_SUBID), data = waking_cort_df)
+  deviance(mod, REML = F) 
+}
+
+# set the range of breakpoints you'd allow. 
+search.range <- c(min(waking_cort_df$corrected_cort_age_yrs)+
+                    0.5,max(waking_cort_df$corrected_cort_age_yrs)-0.5)
+# find the optimal model  based on breakpoint. 
+mod.opt <- optimize(run_models, interval = search.range)
+bp <- mod.opt$minimum 
+
+# get a confidence interval of your break point. 
+CI.bp <- function(bp, tgt)
+{
+  run_models(bp) - tgt
+}
+# get info for confidence interval for break point! 
+tgt <- mod.opt$objective + qchisq(0.95,1)
+lb95 <- uniroot(CI.bp, lower=search.range[1], upper=bp, tgt=tgt)
+ub95 <- uniroot(CI.bp, lower=bp, upper=search.range[2], tgt=tgt)
+bp_lower <-lb95$root
+bp_upper <- ub95$root
+# save output.
+optimize_piecewise_bp <- cbind(bp, bp_lower, bp_upper)
+save(optimize_piecewise_bp, file = "model_output/waking_optimize_piecewise_breakpoint.Rdata")
+```
+
+center ages on the breakpoint 
+```{r}
+# center these ages on the bp
+# changing this so that age1 and age2 are centered at breakpoint.
+waking_cort_df$age1 <- b1(waking_cort_df$corrected_cort_age_yrs, bp) -bp 
+waking_cort_df$age2 <- b2(waking_cort_df$corrected_cort_age_yrs, bp) -bp
+```
+
+### model with optimal breakpoint.
+```{r}
+lmer_piecewise_waking <- lmer(cort_use ~ 
+                                GROUP + age1 + age2 + 
+                          GROUP:age1 + GROUP:age2 + batch.c + 
+                          index_wave.c + index_day.c + 
+                 sex.centered + meds.c +
+                      (1 + index_wave.c | IDENT_SUBID), 
+                   data = waking_cort_df)
+#lmer_piecewise_waking
+summary(lmer_piecewise_waking)
+save(lmer_piecewise_waking, file= "model_output/waking_cort_piecewise_model.Rdata")
+
+```
+
+## Calculate ICC for mixed effects
+```{r, warnings = F}
+# from empty model
+mod <- lmer(cort_use ~ (1 | IDENT_SUBID), data = waking_cort_df)
+icc(mod)
+ICC_cort <- icc(mod)[1]
+save(ICC_cort, file = "model_output/ICC_for_waking_cort.Rdata")
+
+# from full piecewise model
+icc(lmer_piecewise_waking, adjusted = TRUE)
+ICC_cort <- icc(lmer_piecewise_waking, adjusted=TRUE)[1]
+save(ICC_cort, file = "model_output/ICC_for_waking_cort_full_piecewise_model.Rdata")
+
+```
+
+### prep for plotting
+make new dataframe for plotting fitted effects
+```{r}
+# make specific new data for COMP age effect.
+stuff <- data.frame(age1 = c(-9, -8, -7, -6.44, -5, -4, -3, -2, -1, -0.0001, rep(0,6)),
+                    age2 = c(rep(0, 10), .0001, 2, 3, 4, 5, 5.9), 
+                    GROUP = c(rep("COMP", 16), rep("PI",16)), batch.c = 0, 
+       sex.centered = 0, meds.c = 0, index_wave.c = 0, index_day.c = 0)
+nrow(stuff)
+
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~  GROUP + age1 + age2 +
+                          GROUP:age1 + GROUP:age2 + batch.c +
+                          index_wave.c + index_day.c + 
+                    sex.centered + meds.c, 
+                    data = stuff) 
+#head(fit.mat)
+cis <- diag(fit.mat %*% tcrossprod(vcov(lmer_piecewise_waking), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+# 
+stuff$cort_Y <- predict(lmer_piecewise_waking, stuff, re.form = NA)
+stuff$cort_lwr <- stuff$cort_Y-1.96*sqrt(cis)
+stuff$cort_upr <- stuff$cort_Y+1.96*sqrt(cis)
+
+# split into 2 dataframes and then stack. 
+stuffage1 <- stuff %>%
+  dplyr::select(-age2) %>%
+  filter(age1 < 0) %>%
+ rename(corrected_cort_age_yrs = age1) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs + bp)
+stuffage2 <- stuff %>%
+  dplyr::select(-age1) %>%
+  filter(age2 > 0) %>%
+  rename(corrected_cort_age_yrs = age2) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs + bp)
+
+```
+
+### make plot 
+```{r}
+
+waking_piecewise_PI_plot <- ggplot(stuffage1, aes(x = corrected_cort_age_yrs, 
+                                                  y = cort_Y, color = GROUP)) + 
+  geom_line(size = 1) + geom_line(data =stuffage2, aes(x = corrected_cort_age_yrs, 
+                                                       y = cort_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 +
+  ylab("Waking Cortisol (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = subset(cort_ave_days_m, time_of_day == "Waking"),
+             aes(x= corrected_cort_age_yrs, y= cort_use, 
+                                         color = GROUP), size=1, alpha = 0.2)+ 
+  geom_line(data = subset(cort_ave_days_m, time_of_day == "Waking"),
+            aes(x = corrected_cort_age_yrs, y = cort_use, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.2) + 
+ scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+ scale_y_continuous(expand = expand_scale(mult = c(0, .1))) +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) + 
+  geom_ribbon(data = stuffage1, aes(ymin = cort_lwr, ymax =cort_upr, fill = GROUP),  alpha = .1, color = NA)  + 
+  geom_ribbon(data = stuffage2, aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP), alpha = 0.1, color = NA)
+
+pdf("figures/waking_piecewise_model_plot_overlapped_CI.pdf", width = 6, height = 4)
+waking_piecewise_PI_plot
+dev.off()
+
+# save to powerpoint
+ppt_test2 <- read_pptx() %>%
+  add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  ph_with_vg(code = print(waking_piecewise_PI_plot)) %>%
+  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/waking_piecewise_model_plot_overlapped_CI.pptx")
+  
+```
+
+
+### prep for signficance plot of group differences across age
+```{r}
+bp = 13
+age.search.range <- seq(from = min(data_use$corrected_cort_age_yrs)- bp, to =  max(data_use$corrected_cort_age_yrs) - bp, by = 0.25)
+
+waking_SS_table <- data.frame() 
+for (age in age.search.range){
+  if(age < 0){ # 0 = breakpoint of age 13
+    ss_test <- data.frame(Age = age + bp, condslope.lmer.pointestimates("GROUPPI", "age1", age, lmer_piecewise_waking))
+   # print(ss_test)
+  } else {
+    ss_test <- data.frame(Age = age + bp, condslope.lmer.pointestimates("GROUPPI", "age2", age, lmer_piecewise_waking))
+  }
+  waking_SS_table <- rbind(waking_SS_table, ss_test)
+}
+#waking_SS_table
+save(waking_SS_table, file = "model_output/waking_piecewise_orig_posthoc_group_diff.Rdata")
+
+# age cut-offs
+PI_greater_than_comp <- waking_SS_table %>%
+  filter(p.val < 0.05 & w1.slope > 0) %>%
+  summarize(min_age = min(Age), 
+            max_age = max(Age)) %>%
+  mutate(comparison = "PI > COMP")
+
+PI_smaller_than_comp <- waking_SS_table %>%
+  filter(p.val < 0.05 & w1.slope < 0) %>%
+  summarize(min_age = min(Age), 
+            max_age = max(Age)) %>%
+  mutate(comparison = "PI < COMP")
+
+waking_SS_agerange_table <- rbind(PI_greater_than_comp, PI_smaller_than_comp)
+waking_SS_agerange_table
+ save(waking_SS_agerange_table, file = "model_output/wakingpiecewise_orig_posthoc_ageranges_of_group_diff.Rdata")
+
+```
+
+### make plot
+```{r}
+waking_SS_plot <- ggplot(waking_SS_table, aes(x = Age, y = w1.slope)) + 
+  geom_line() + geom_ribbon(aes(ymin = lower95, ymax = upper95), alpha = 0.2) + 
+  geom_hline(aes (yintercept = 0), linetype = "dashed") + ylab("Group effect for waking cortisol (PI - COMP)") +
+ scale_x_continuous(breaks = seq(4,19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+ scale_y_continuous(expand = expand_scale(mult = c(0, .1))) 
+
+pdf("figures/waking_piecewise_model_SS_significance_plot.pdf", width =6, height = 4)
+waking_SS_plot
+dev.off()
+
+# save to powerpoint
+ppt_test2 <- read_pptx() %>%
+  add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  ph_with_vg(code = print(waking_SS_plot)) %>%
+  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/waking_piecewise_model_SS_significance_plot.pptx")
+  
+```
+
+## option 1: combining interaction plot and significance plot with entire age range
+```{r}
+library(gridExtra)
+waking_piecewise_PI_plot2 <- waking_piecewise_PI_plot + ylim(0, 50)
+waking_SS_plot2 <- waking_SS_plot + ylim(-20, 20)
+grid.arrange(waking_piecewise_PI_plot2, waking_SS_plot2)
+
+#SAVING TO POWERPT 
+ppt_test2 <- read_pptx() %>%
+  add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  ph_with_vg(code = print(grid.arrange(waking_piecewise_PI_plot2, waking_SS_plot2))) %>%
+  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/stacked_waking_piecewise_SS_plots.pptx")
+  
+```
+
+### post-hoc calculations for piecewise model 
+```{r}
+# calculate slopes for age effects, per group, before and after breakpoint.
+comp_slope_age1 <- data.frame(group = "COMP", condslope.lmer.slopes( "age1","GROUPPI", 0, lmer_piecewise_waking))
+PI_slope_age1 <- data.frame(group = "PI", condslope.lmer.slopes("age1", "GROUPPI", 1, lmer_piecewise_waking))
+comp_slope_age2 <- data.frame(group = "COMP", condslope.lmer.slopes( "age2","GROUPPI", 0, lmer_piecewise_waking))
+PI_slope_age2 <- data.frame(group = "PI", condslope.lmer.slopes("age2", "GROUPPI", 1, lmer_piecewise_waking))
+
+waking_posthoc_slopes <- rbind(comp_slope_age1, PI_slope_age1, comp_slope_age2, PI_slope_age2)
+
+names(waking_posthoc_slopes) <- c("GROUP", "Breakpoint Intercept", "Estimated Slope", "df", "t.value", "p.value", "lower", "upper")
+waking_posthoc_slopes$'Age range' <- c("age1", "age1", "age2", "age2")
+waking_posthoc_slopes
+# save table 
+save(waking_posthoc_slopes, file = "model_output/waking_piecewise_orig_posthoc_age_slopes.Rdata")
+```
+
+
+# EVENING ONLY 
+```{r}
+# subset data to only include evening cort
+evening_cort_df <-  subset(data_use, time_of_day == "Evening")
+
+```
+
+## 1) Linear
+```{r}
+# center these ages on the bp
+lmer_linear_evening <- lmer(cort_use ~ 
+                                GROUP + GROUP*corrected_cort_age_yrs + 
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c +
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                   data = evening_cort_df)
+#lmer_piecewise_waking
+summary(lmer_linear_evening)
+save(lmer_linear_evening, file= "model_output/evening_cort_linear_model.Rdata")
+```
+
+## 2) Quadratic
+```{r}
+# center these ages on the bp
+
+lmer_quadratic_evening <- lmer(cort_use ~ 
+                               GROUP*age_squared + GROUP*corrected_cort_age_yrs +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c +
+                     + (1 | IDENT_SUBID), 
+                   data = evening_cort_df)
+#lmer_piecewise_waking
+summary(lmer_quadratic_evening)
+save(lmer_quadratic_evening, file= "model_output/evening_cort_quadratic_model.Rdata")
+```
+
+## 3) Piecewise both groups vary 
+note: using same breakpoint as waking models.
+```{r}
+# center these ages on the bp
+lmer_piecewise_evening <- lmer(cort_use ~ 
+                                GROUP + age1 + age2 + 
+                          GROUP:age1 + GROUP:age2 +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c +
+                     + (1 | IDENT_SUBID), 
+                   data = evening_cort_df)
+#lmer_piecewise_waking
+summary(lmer_piecewise_evening)
+save(lmer_piecewise_evening, file= "model_output/evening_cort_piecewise_model.Rdata")
+```
+
+
+# Comparing models
+
+## omnibus models (evening and waking)
+```{r}
+anova(lmer_linear, lmer_quad_nested) # big difference from linear to quad
+anova(lmer_quad_nested, piecewise_mod_waking_ref) # big difference from quad to piecewise
+
+AIC_table <- AIC(lmer_linear, lmer_quad_nested, piecewise_mod_waking_ref)
+BIC_table <- BIC(lmer_linear, lmer_quad_nested, piecewise_mod_waking_ref)
+model_comparison_cort <- data.frame(cbind(AIC_table, BIC_table$BIC))
+names(model_comparison_cort) <- c("DF", "AIC", "BIC")
+rownames(model_comparison_cort) <- c("Linear", "Quadratic", "Piecewise")
+model_comparison_cort$model <- rownames(model_comparison_cort)
+
+#save 
+model_comparison_cort
+save(model_comparison_cort, file = "model_output/model_comparisons_cort.Rdata")
+
+
+```
+
+
+## Waking models only 
+```{r}
+anova(lmer_linear_waking, lmer_quadratic_waking) #, big difference from linear to quadratic
+anova(lmer_quadratic_waking, lmer_piecewise_waking) # big difference from quadratic to piecewise
+
+# to simplify my life, just going to report the 3 models for now 
+AIC_table <- AIC(lmer_linear_waking, lmer_quadratic_waking, lmer_piecewise_waking)
+BIC_table <- BIC(lmer_linear_waking, lmer_quadratic_waking, lmer_piecewise_waking)
+model_comparison_waking <- data.frame(cbind(AIC_table, BIC_table$BIC))
+names(model_comparison_waking) <- c("DF", "AIC", "BIC")
+rownames(model_comparison_waking) <- c("Linear", "Quadratic", "Piecewise")
+model_comparison_waking$model <- rownames(model_comparison_waking)
+save(model_comparison_waking, file = "model_output/model_comparisons_waking.Rdata")
+
+model_comparison_waking
+```
+
+
+## evening models only 
+```{r}
+anova(lmer_linear_evening, lmer_quadratic_evening) #, no difference from linear to quadratic
+anova(lmer_quadratic_evening, lmer_piecewise_evening) # big difference from quadratic to piecewise
+
+# to simplify my life, just going to report the 3 models for now 
+AIC_table <- AIC(lmer_linear_evening, lmer_quadratic_evening, lmer_piecewise_evening)
+BIC_table <- BIC(lmer_linear_evening, lmer_quadratic_evening, lmer_piecewise_evening)
+model_comparison_evening <- data.frame(cbind(AIC_table, BIC_table$BIC))
+names(model_comparison_evening) <- c("DF", "AIC", "BIC")
+rownames(model_comparison_evening) <- c("Linear", "Quadratic", "Piecewise")
+model_comparison_evening$model <- rownames(model_comparison_evening)
+save(model_comparison_evening, file = "model_output/model_comparisons_evening.Rdata")
+
+model_comparison_evening
+```

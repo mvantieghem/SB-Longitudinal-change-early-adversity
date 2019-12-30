@@ -1,0 +1,360 @@
+---
+title: "Cleaning testosterone"
+author: "Michelle.VanTieghem"
+date: "June 11, 2018"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# clean and organize data for for longitudinal TESTOSTERONE
+- based on sex - within sex normed percentages? 
+- significant effects of time of day (waking > evening)
+- a lot of evening testos data missing from wave 1 
+- so we will use only waking testos values! 
+
+```{r, include = F}
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+main_dir <- "/Users/michellevantieghem2/Documents/Columbia/LabDATA/Projects/git_repo_backups/structural_analysis_2018/"
+
+```
+
+# load data that has cort + testosterone, 
+with correct ages and times, which includes all data entry master data.
+and has already removed cortisol outliers. 
+so we are just going to find testosterone for these samples. 
+```{r}
+# load data, already reformatted and with *corrected* times!!
+load(file=  "../../../data/1_cort_data/1C_long_cort_added_puberty_and_meds.Rdata")
+nrow(cort_cleaned.no.outliers)
+
+cort_cleaned.no.outliers$gender.f <- with(cort_cleaned.no.outliers, as.factor(ifelse(DEM_3_GENDER_CHILD == 0, "male", "female")))
+
+range(cort_cleaned.no.outliers$corrected_cort_age_yrs)
+
+```
+
+
+```{r}
+
+names(cort_cleaned.no.outliers)[grepl("test", names(cort_cleaned.no.outliers))]
+summary(cort_cleaned.no.outliers$testosterone_notes)
+summary(cort_cleaned.no.outliers$testosterone)
+range(cort_cleaned.no.outliers$testosterone, na.rm = T)
+
+```
+
+# Cleaning 
+## get rid of extreme / impalusible values first 
+but don't remove entire ROW, just fill in NA for testosterone
+because we want to keep the good cort values! 
+how do I know what plausible values are supposed to be? 
+```{r}
+hist(cort_cleaned.no.outliers$testosterone)
+cort_cleaned.no.outliers$testos_cleaned <- ifelse(cort_cleaned.no.outliers$testosterone > 500, NA, 
+                                                 as.numeric(cort_cleaned.no.outliers$testosterone))
+
+hist(cort_cleaned.no.outliers$testos_cleaned)
+```
+
+## log transformation
+from dominics paper. 
+
+```{r}
+# how many zeros? 
+zeros <- sum(ifelse(cort_cleaned.no.outliers$testos_cleaned == 0, 1, 0), na.rm  = T)
+zeros # these two values will be come infinity, change to 0.001
+cort_cleaned.no.outliers$testos_cleaned2 <- ifelse(cort_cleaned.no.outliers$testos_cleaned == 0, 0.1, 
+                                                 cort_cleaned.no.outliers$testos_cleaned)
+
+
+cort_cleaned.no.outliers$testos_cleaned_log <- log(cort_cleaned.no.outliers$testos_cleaned2)
+hist(cort_cleaned.no.outliers$testos_cleaned_log)
+summary(cort_cleaned.no.outliers$testos_cleaned_log)
+```
+
+## check what time of day most testos collected
+data was collected across all times of day... 
+```{r}
+check_td <- cort_cleaned.no.outliers %>% 
+  mutate(index4.f = ifelse(index4 == 1, "waking", ifelse(index4 == 2, "waking+45", ifelse(index4 == 3, "5pm", "8pm")))) %>%
+  group_by( index_wave, index_day, index4, index4.f) %>% #, index_day, index_wave) %>%
+  summarize(N_samples = n(),
+            N_testos = sum(!is.na(testos_cleaned_log)),
+            N_missing_testos = sum(is.na(testos_cleaned_log)))
+check_td
+
+```
+
+
+## graph raw data 
+```{r}
+
+ggplot(cort_cleaned.no.outliers, aes(x = index4, y = testos_cleaned_log)) + 
+  geom_smooth() + theme_classic() + geom_point (alpha = 0.5) + facet_grid (gender.f ~ index_wave)
+```
+
+
+## test whether there are timeof day effects on testosterone
+```{r}
+testos_timeofday <- lmer(testos_cleaned_log ~ batch + index_day + time_of_day + index_wave + GROUP + corrected_cort_age_yrs + (1 | IDENT_SUBID), 
+     data = cort_cleaned.no.outliers)
+summary(testos_timeofday)
+save(testos_timeofday, file = "../supplemental/tables/testos_time_of_day_model.Rdata")
+```
+
+## waking > evening for testosterone.
+```{r}
+library(effects)
+plot(effect("time_of_day", testos_timeofday))
+```
+
+
+## average testos measures: by wave across all times of day
+```{r}
+# calculate the mean testosterone for each subject on each day for each wave. 
+testos_wave <- cort_cleaned.no.outliers %>% 
+  filter(time_of_day == "waking") %>%
+  group_by(IDENT_SUBID, index_wave) %>%
+  summarize(testos_cleaned_log_wave_ave = mean(testos_cleaned_log, na.rm = T))
+
+hist(testos_wave$testos_cleaned_log_wave_ave)
+
+# merge back into long dataset. for future use. 
+cort_cleaned.no.outliers <- left_join(cort_cleaned.no.outliers, testos_wave, by = c("IDENT_SUBID", "index_wave"))
+
+nrow(cort_cleaned.no.outliers)
+```
+
+
+
+## make a df for testsos specifically 
+note: only 10 PI males with testos at wave 3! be careful with 3 way ints.
+```{r}
+# can't be duplicated across all of these times of day and days 
+# just one row per wave per subj.
+
+# note: index day is atually already mean-centered so we need -1! 
+testos_df <- subset(cort_cleaned.no.outliers, index4 == 1 & index_day == -1)
+nrow(testos_df)
+summary(testos_df$index_wave)
+
+table <- testos_df %>% 
+  group_by(GROUP, gender.f, index_wave) %>%
+  summarize(n = n())
+table
+```
+
+
+## graph cleaned testos by group and sex.
+```{r}
+testos_df$index_wave.n <- as.numeric(as.character(testos_df$index_wave))
+ggplot(testos_df, aes(x =index_wave.n, y = testos_cleaned_log_wave_ave, color = GROUP)) + 
+  theme_classic()+ geom_point(alpha = 0.5) + geom_smooth() + facet_grid (GROUP ~ gender.f)  
+
+
+```
+
+## graph cleaned testos by batch.
+```{r}
+ggplot(testos_df, aes(x = as.factor(batch), y = testos_cleaned_log_wave_ave)) + 
+  geom_violin () + theme_bw() + geom_jitter (alpha = 0.5)
+
+
+```
+
+# calculate outliers by gender & group... there are no outliers!
+```{r}
+# group the data by GENDER, and wave (not day or time of day)
+# using the transformmed day average varaiable for testosterone. 
+outlier_groups <- group_by(testos_df, GROUP, gender.f)
+
+# get the means, SD, upper and lower limit (3 SD above or below mean) for *each* grouping of cort daya
+outlier_info <- summarize(outlier_groups, mean= mean(testos_cleaned_log_wave_ave, na.rm = TRUE), sd= sd(testos_cleaned_log_wave_ave, na.rm = TRUE), upper_limit= mean(testos_cleaned_log_wave_ave, na.rm =TRUE) + 3*sd(testos_cleaned_log_wave_ave, na.rm = TRUE), lower_limit=mean(testos_cleaned_log_wave_ave, na.rm = TRUE) - 3*sd(testos_cleaned_log_wave_ave, na.rm = TRUE))
+
+# make an empty dataframe to store new stuff in 
+testos.outliers <- data.frame()
+
+# make an empty column in outlier_info to store N outliers 
+outlier_info$N_outliers <- NA
+
+# for each grouping of cortisol data in outlier_info 
+for (i in 1:nrow(outlier_info)){
+  group <- outlier_info$GROUP[i]
+  gender<- outlier_info$gender.f[i]
+  # set the max and minimum values of cortisol that we will use as outlier threshold
+  lower_limits <- outlier_info$lower_limit[i]
+  upper_limits <- outlier_info$upper_limit[i]
+  # get all of the original data by group & cort index  
+  data_chunk <- subset(testos_df, gender.f == gender & GROUP == group)
+  # mark the outliers as True 
+  data_chunk$testos_mark_outliers <- ifelse(data_chunk$testos_cleaned_log_wave_ave >= upper_limits
+                          | data_chunk$testos_cleaned_log_wave_ave <= lower_limits, T, F)
+  # replace outlier values with NAs in a new variable 
+  data_chunk$testos_cleaned_log_wave_ave <- ifelse(data_chunk$testos_cleaned_log_wave_ave == T, NA, data_chunk$testos_cleaned_log_wave_ave)
+ # print(nrow(data_chunk))
+  # count how many NAs there are - how many outliers there are.
+  N_outliers <- sum(data_chunk$testos_mark_outliers, na.rm = TRUE)
+  # save the N in your outlier table at the correct index 
+  outlier_info$N_outliers[i] <- N_outliers 
+  # save this into a new dataframe 
+  testos.outliers <- rbind(testos.outliers, data_chunk) 
+} 
+
+outlier_info
+# ok, good identical.
+nrow(testos.outliers)
+nrow(testos_df)
+
+
+```
+
+# check models testos 
+## test for differences by sex
+
+```{r}
+
+testos_gender <- lmer(testos_cleaned_log_wave_ave ~ gender.f + GROUP + corrected_cort_age_yrs + index_wave + batch + 
+                      + (1 | IDENT_SUBID), data = testos_df)
+
+anova(testos_gender)
+
+```
+
+
+## age x gender effect... and group effect.
+```{r}
+testos_gender_int <- lmer(testos_cleaned_log_wave_ave~ GROUP + gender.f*corrected_cort_age_yrs + index_wave + batch  + 
+                       (1 | IDENT_SUBID), data = testos_df)
+
+anova(testos_gender_int)
+```
+
+
+## no group x sex effect
+```{r}
+testos_gender_int <- lmer(testos_cleaned_log_wave_ave~ GROUP*gender.f + gender.f*corrected_cort_age_yrs + index_wave + batch  + 
+                       (1 | IDENT_SUBID), data = testos_df)
+
+anova(testos_gender_int)
+```
+
+### plot age x sex effects on testos (expected in literature)
+```{r}
+ggplot(testos_df, aes(x =corrected_cort_age_yrs, y = testos_cleaned_log_wave_ave, color = gender.f)) + 
+  geom_smooth(method = "lm") + theme_bw() + geom_jitter (alpha = 0.5) #+ facet_grid (~ gender.f)
+
+```
+
+
+## thought there might be group x age x gender effect
+there is not - good, not supposed to be! 
+```{r}
+testos_gender_int <- lmer(testos_cleaned_log_wave_ave ~  GROUP * gender.f* corrected_cort_age_yrs + index_wave 
+                      + (1 | IDENT_SUBID), data = testos_df)
+
+anova(testos_gender_int)
+```
+
+### plot this effect
+confirming that age-related increases are the same across PIS and COMPS
+```{r}
+ggplot(testos_df, aes(x =corrected_cort_age_yrs, y = testos_cleaned_log_wave_ave, color = GROUP)) + 
+  geom_smooth(method = "lm") + theme_bw() + geom_jitter (alpha = 0.5) + facet_grid (~ gender.f)
+
+```
+
+
+
+# rank order within sex - (across both groups)
+
+## first get min and max for each sex 
+```{r}
+testos_min_max <- testos_df %>%
+  group_by(DEM_3_GENDER_CHILD) %>% 
+  filter(!is.na(testos_cleaned_log_wave_ave)) %>% 
+  summarize(min=min(testos_cleaned_log_wave_ave), 
+            max= max(testos_cleaned_log_wave_ave), 
+            mean=mean(testos_cleaned_log_wave_ave))
+
+testos_min_max
+
+```
+
+## now gender-norm the testos values 
+subtract min value within each group from individual testos levels for each subject
+scale this by dividing the diff between max and min values withn each group
+obtain a percent of maximum possiblity score for each participant
+Cohen 1999 (from Dominic 2015)
+```{r}
+min_female <- testos_min_max$min[testos_min_max$DEM_3_GENDER_CHILD == 1]
+min_male <- testos_min_max$min[testos_min_max$DEM_3_GENDER_CHILD == 0]
+
+# then calculate diff max and min 
+diff_female <- testos_min_max$max[testos_min_max$DEM_3_GENDER_CHILD == 1]- testos_min_max$min[testos_min_max$DEM_3_GENDER_CHILD == 1]
+diff_male <- testos_min_max$max[testos_min_max$DEM_3_GENDER_CHILD == 0]-
+  testos_min_max$min[testos_min_max$DEM_3_GENDER_CHILD == 0]
+
+
+# substract the min for each sex - so min - min will = zero. 
+# then also divide the result by the diff of that sex.
+# will yield a perentage! 
+testos_df$testos_cleaned_log_wave_ave_gender_normed <- with(testos_df,
+  ifelse(gender.f == "female",
+  (testos_cleaned_log_wave_ave - min_female) / diff_female, 
+  ifelse(gender.f == "male", (testos_cleaned_log_wave_ave -min_male)/diff_male, NA)))
+
+
+summary(as.numeric(testos_df$testos_cleaned_log_wave_ave_gender_normed))
+# why are there 3 NAs? those subjects migt not have testos? yes. or they were outliers. 
+
+hist(testos_df$testos_cleaned_log_wave_ave_gender_normed)
+```
+
+## graph the tranformed data 
+```{r}
+
+ggplot(testos_df, aes(x = testos_cleaned_log_wave_ave,
+                               y = testos_cleaned_log_wave_ave_gender_normed,
+                               color = gender.f)) + 
+  theme_bw() + geom_jitter (alpha = 0.5) #+ facet_grid (~ gender.f)
+
+```
+
+## conduct group differences with the normed data 
+still a group difference!! 
+```{r}
+
+testos_gender_int <- lmer(testos_cleaned_log_wave_ave_gender_normed ~ GROUP + gender.f  + batch + 
+                          + corrected_cort_age_yrs + index_wave +
+                       (1 | IDENT_SUBID), data = testos_df)
+
+anova(testos_gender_int)
+
+```
+
+## merge the normed testosterone things with the data
+```{r}
+# keep only the testosterone data 
+testos_merge <- testos_df %>% 
+  select(IDENT_SUBID, index_wave, testos_cleaned_log_wave_ave, testos_cleaned_log_wave_ave_gender_normed)
+
+# remove the old testos (uncleaned) data from the giant cortisol df 
+cort_merge7_no_testos <- cort_cleaned.no.outliers %>%
+  select(-starts_with("testos"))
+
+# now left join, so that the testos-wave-averages get added to the cortisol data 
+cort_merge8 <- left_join(cort_merge7_no_testos, testos_merge, by = c("IDENT_SUBID", "index_wave"))
+
+save(cort_merge8, file ="../../../data/1_cort_data/1D_long_cort_testos_cleaned.Rdata")
+```

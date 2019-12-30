@@ -1,0 +1,138 @@
+---
+title: "Add longitudinal puberty measures and medicine covariates to cort data"
+author: "Michelle VanTieghem"
+date: "Feb 13, 2018"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+# load data
+```{r}
+load(file="../../../data/1_cort_data/1B_long_cort_added_age_intervals.Rdata")
+
+nrow(cort_cleaned.no.outliers)
+range(cort_cleaned.no.outliers$corrected_cort_age_yrs)
+
+```
+
+# adding puberty covariate from petersen scale
+```{r}
+# Calculating mean Petersen development score! # skip number 5 for females 
+# http://www.sleepforscience.org/contentmgr/showdetails.php/id/91
+
+length(cort_cleaned.no.outliers$PDS_female_mean)
+# calculate means first. 
+cort_cleaned.no.outliers$PDS_female_mean <- ifelse(cort_cleaned.no.outliers$index_wave == 1, ((cort_cleaned.no.outliers$PPDS_F_1 + cort_cleaned.no.outliers$PPDS_F_2 + cort_cleaned.no.outliers$PPDS_F_3 + cort_cleaned.no.outliers$PPDS_F_4 +cort_cleaned.no.outliers$PPDS_F_5)/5),
+                                ifelse(cort_cleaned.no.outliers$index_wave == 2, ((cort_cleaned.no.outliers$PPDS_F_1_FU1 + cort_cleaned.no.outliers$PPDS_F_2_FU1 + cort_cleaned.no.outliers$PPDS_F_3_FU1 + cort_cleaned.no.outliers$PPDS_F_4_FU1 +cort_cleaned.no.outliers$PPDS_F_5_FU1)/5),
+                                  ifelse(cort_cleaned.no.outliers$index_wave == 3, ((cort_cleaned.no.outliers$PPDS_F_1_FU2 + cort_cleaned.no.outliers$PPDS_F_2_FU2 + cort_cleaned.no.outliers$PPDS_F_3_FU2 + cort_cleaned.no.outliers$PPDS_F_4_FU1 +cort_cleaned.no.outliers$PPDS_F_5_FU2)/5), NA)))
+
+cort_cleaned.no.outliers$PDS_male_mean <- ifelse(cort_cleaned.no.outliers$index_wave == 1, ((cort_cleaned.no.outliers$PPDS_M_1 + cort_cleaned.no.outliers$PPDS_M_2 + cort_cleaned.no.outliers$PPDS_M_3 + cort_cleaned.no.outliers$PPDS_M_4 +cort_cleaned.no.outliers$PPDS_M_5)/5),
+                                ifelse(cort_cleaned.no.outliers$index_wave == 2, ((cort_cleaned.no.outliers$PPDS_M_1_FU1 + cort_cleaned.no.outliers$PPDS_M_2_FU1 + cort_cleaned.no.outliers$PPDS_M_3_FU1 + cort_cleaned.no.outliers$PPDS_M_4_FU1 +cort_cleaned.no.outliers$PPDS_M_5_FU1)/5),
+                                  ifelse(cort_cleaned.no.outliers$index_wave == 3, ((cort_cleaned.no.outliers$PPDS_M_1_FU2 + cort_cleaned.no.outliers$PPDS_M_2_FU2 + cort_cleaned.no.outliers$PPDS_M_3_FU2 + cort_cleaned.no.outliers$PPDS_M_4_FU1 +cort_cleaned.no.outliers$PPDS_M_5_FU2)/5), NA)))
+
+cort_cleaned.no.outliers$PDS_mean <- ifelse(cort_cleaned.no.outliers$DEM_3_GENDER_CHILD == 0, cort_cleaned.no.outliers$PDS_male_mean, cort_cleaned.no.outliers$PDS_female_mean)
+
+cort_cleaned.no.outliers$has_puberty_baseline <-ifelse(!is.na(cort_cleaned.no.outliers$PPDS_M_5) | !is.na(cort_cleaned.no.outliers$PPDS_F_5), 1, 0)
+cort_cleaned.no.outliers$has_puberty_FU1 <- ifelse(!is.na(cort_cleaned.no.outliers$PPDS_M_5_FU1) | !is.na(cort_cleaned.no.outliers$PPDS_F_5_FU1), 1, 0)
+cort_cleaned.no.outliers$has_puberty_FU2 <- ifelse(!is.na(cort_cleaned.no.outliers$PPDS_M_5_FU2) | !is.na(cort_cleaned.no.outliers$PPDS_F_5_FU2), 1, 0)
+# lots of NAs...
+sum(is.na(cort_cleaned.no.outliers$PDS_mean))
+ # we have very little puberty data!!
+sum(!is.na(cort_cleaned.no.outliers$PDS_mean))
+
+nrow(cort_cleaned.no.outliers)
+summary(cort_cleaned.no.outliers$PDS_mean[cort_cleaned.no.outliers$index_wave==1])
+summary(cort_cleaned.no.outliers$PDS_mean[cort_cleaned.no.outliers$index_wave==2])
+summary(cort_cleaned.no.outliers$PDS_mean[cort_cleaned.no.outliers$index_wave==3])
+```
+
+## Get a summary of how many subs have puberty, by wave
+```{r}
+# subset baseline cort only: 247
+baselinecort <- subset(cort_cleaned.no.outliers, has_puberty_baseline == 1)
+N_Base_all <- length(unique(baselinecort$IDENT_SUBID))
+
+# subset FU1 cort only: 103
+FU1_pub <- subset(cort_cleaned.no.outliers,  has_puberty_FU1 == 1)
+N_FU1_all <- length(unique(FU1_pub$IDENT_SUBID))
+
+# subset FU2 cort: 74
+FU2_pub <- subset(cort_cleaned.no.outliers, has_puberty_FU2 == 1)
+N_FU2_all <- length(unique(FU2_pub$IDENT_SUBID))
+
+#FU1 and FU2 only : 56
+FU1FU2pub <- subset(cort_cleaned.no.outliers, has_puberty_FU1 == 1 & has_puberty_FU2 == 1 & has_puberty_baseline == 0)
+N_FU1_FU2 <- length(unique(FU1FU2pub$IDENT_SUBID))
+
+
+# Base and FU1: 56 
+BaseFU1pub <- subset(cort_cleaned.no.outliers, has_puberty_FU1 == 1 & has_puberty_baseline == 1 & has_puberty_FU2 == 0)
+N_Base_FU1 <- length(unique(BaseFU1pub$IDENT_SUBID))
+
+#subset Base+FU2 cort 
+BaseFU2pub <-  subset(cort_cleaned.no.outliers,has_puberty_FU1 == 0 & has_puberty_baseline == 1 & has_puberty_FU2 == 1)
+N_Base_FU2 <- length(unique(BaseFU2pub$IDENT_SUBID))
+
+#subjects w all 3 waves of cort! 51
+BaseFU1FU2pub <-  subset(cort_cleaned.no.outliers,has_puberty_FU1 == 1 & has_puberty_baseline == 1 & has_puberty_FU2 == 1)
+N_Base_FU1_FU2 <- length(unique(BaseFU1FU2pub$IDENT_SUBID))
+
+# 2 
+BaseFU1orFU2pub <- subset(cort_cleaned.no.outliers, ((has_puberty_FU1 == 1 | has_puberty_FU2 == 1) & has_puberty_baseline == 1))
+                   
+N_Base_FU1orFU2 <- length(unique(BaseFU1orFU2pub$IDENT_SUBID))
+
+```
+
+## puberty table
+```{r}
+
+table <- rbind(N_Base_all, N_FU1_all, N_FU2_all, N_Base_FU1, N_Base_FU2, N_FU1_FU2, N_Base_FU1_FU2, N_Base_FU1orFU2)
+
+table
+```
+
+
+
+# adding medicine covariate
+```{r}
+cort_cleaned.no.outliers$meds <- as.factor(ifelse(cort_cleaned.no.outliers$index_day == 1 & cort_cleaned.no.outliers$index_wave == 1, cort_cleaned.no.outliers$SPIT_HOMEDAY1_6A, 
+                 ifelse(cort_cleaned.no.outliers$index_day == 2 & cort_cleaned.no.outliers$index_wave == 1, cort_cleaned.no.outliers$SPIT_HOMEDAY2_6A,  
+                        ifelse(cort_cleaned.no.outliers$index_day == 1 & cort_cleaned.no.outliers$index_wave == 2, cort_cleaned.no.outliers$SPIT_HOMEDAY1_6A_FU1,
+                        ifelse(cort_cleaned.no.outliers$index_day == 2 & cort_cleaned.no.outliers$index_wave == 2, cort_cleaned.no.outliers$SPIT_HOMEDAY2_6A_FU1,
+                        ifelse(cort_cleaned.no.outliers$index_day == 1 & cort_cleaned.no.outliers$index_wave == 3, cort_cleaned.no.outliers$SPIT_HOMEDAY1_6A_FU2, NA))))))
+  
+
+# for at least those we have.... but this should really go in the time analysis.
+summary(cort_cleaned.no.outliers$meds)
+# make the NAs zeros 
+cort_cleaned.no.outliers$meds[is.na(cort_cleaned.no.outliers$meds)] <- 0
+
+# now make one that says if they were on meds EITHER day for that wave
+cort_cleaned.no.outliers$meds_by_wave <- as.factor(
+  ifelse(cort_cleaned.no.outliers$index_wave == 1 & (cort_cleaned.no.outliers$SPIT_HOMEDAY1_6A==1 | cort_cleaned.no.outliers$SPIT_HOMEDAY2_6A==1),1,
+   ifelse(cort_cleaned.no.outliers$index_wave == 2 & (cort_cleaned.no.outliers$SPIT_HOMEDAY1_6A_FU1 == 1 | cort_cleaned.no.outliers$SPIT_HOMEDAY2_6A_FU1 == 1),1,      
+  ifelse(cort_cleaned.no.outliers$index_wave == 3 & (cort_cleaned.no.outliers$SPIT_HOMEDAY1_6A==1 | cort_cleaned.no.outliers$SPIT_HOMEDAY2_6A==1),1, 0))))
+                                     
+summary(cort_cleaned.no.outliers$meds_by_wave)
+# fill the NAs with zeros, because we are guessing they didn't take medication
+# if they left the question blank. 
+cort_cleaned.no.outliers$meds_by_wave[is.na(cort_cleaned.no.outliers$meds_by_wave)] <- 0
+summary(cort_cleaned.no.outliers$meds_by_wave)
+
+range(cort_cleaned.no.outliers$corrected_cort_age_yrs)
+
+```
+
+save the data! 
+```{r}
+save(cort_cleaned.no.outliers, file = "../../../data/1_cort_data/1C_long_cort_added_puberty_and_meds.Rdata")
+nrow(cort_cleaned.no.outliers)
+
+```

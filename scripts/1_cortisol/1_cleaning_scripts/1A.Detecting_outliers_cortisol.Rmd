@@ -1,0 +1,133 @@
+---
+title: 'Detecting Outliers in updated cortisol data'
+author: "Michelle VanTieghem"
+date: "May 2018"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# calculate outliers for longitudinal cortisol 
+We want to calculate outliers by Group, Wave, day & time of day
+in other words, subset the data by index20 (each time point per sub) 
+and then split into PI and comparisons
+based on those groups (40) calculate outliers 3SD beyond mean. 
+
+# updated May 2018 
+to account for the fact that we will be removing the youngest kids, and oldest kids, to balance groups! 
+remove outliers AFTER that fact.
+
+# updated june 2018:
+make sure you're using corrected_cort_age_yrs and cort_values_fixed 
+
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+
+# load cleaned data with correct ages and times, which includes all data entry master data.
+```{r}
+# load data, already reformatted and with *corrected* times!!
+load(file= "../../../data/1_cort_data/0_Long_cort_corrected_ages_and_times.Rdata")
+
+nrow(cort_cleaned)
+```
+
+# remove COMPS < age 4 before calculating outliers
+```{r}
+
+cort_cleaned2 <- subset(cort_cleaned, !(IDENT_SUBTYPE == 0 & corrected_cort_age_yrs < 4))
+
+range(cort_cleaned2$corrected_cort_age_yrs, na.rm = T)
+nrow(cort_cleaned2) #
+```
+
+# get rid of extreme / impalusible values first 
+```{r}
+
+plot(cort_cleaned2$cort_values_fixed)
+
+cort_cleaned2 <- subset(cort_cleaned2, cort_values_fixed < 200)
+nrow(cort_cleaned2)
+```
+
+
+# calculate outliers by Group, wave, time of day
+
+```{r}
+# group the data by GROUP (PI or comp) and CORT INDEX20 (e.g. cort 1-20)
+# note: index_20 separates each cortisol data collection time point 
+# cort 1-4 = wave 1, day 1, 4 samples per day
+# cort 5-8 = wave 1, day 2, 4 samples per day
+# cort 9-13 = wave2, day 1, 4 samples per day
+# cort 14-16 = wave2, day 2, 4 samples per day
+# cort 17-20 = wave 3, day 1 (no day 2 at wave 3), 4 samples per day
+
+outlier_groups <- group_by(cort_cleaned2, IDENT_SUBTYPE,index20)
+
+# get the means, SD, upper and lower limit (3 SD above or below mean) for *each* grouping of cort daya
+outlier_info <- dplyr::summarize(outlier_groups, mean= mean(cort_values_fixed, na.rm = TRUE), sd= sd(cort_values_fixed, na.rm = TRUE), upper_limit= mean(cort_values_fixed, na.rm =TRUE) + 3*sd(cort_values_fixed, na.rm = TRUE), lower_limit=mean(cort_values_fixed, na.rm = TRUE) - 3*sd(cort_values_fixed, na.rm = TRUE))
+
+# make an empty dataframe to store new stuff in 
+cort_cleaned2.mark.outliers <- data.frame()
+
+# make an empty column in outlier_info to store N outliers 
+outlier_info$N_outliers <- NA
+
+# for each grouping of cortisol data in outlier_info 
+for (i in 1:nrow(outlier_info)){
+  print(i)
+  # which group is this? PI or comp
+  group <- outlier_info$IDENT_SUBTYPE[i]
+  # which cort index? 1-20
+  index <- outlier_info$index20[i]
+  print(index)
+  # set the max and minimum values of cortisol that we will use as outlier threshold
+  lower_limits <- outlier_info$lower_limit[i]
+  upper_limits <- outlier_info$upper_limit[i]
+  # get all of the original data by group & cort index  
+  data_chunk <- subset(cort_cleaned2, index20 == index & IDENT_SUBTYPE == group)
+  # mark the outliers as True 
+  data_chunk$cort_mark_outliers <- ifelse(data_chunk$cort_values_fixed >= upper_limits
+                          | data_chunk$cort_values_fixed <= lower_limits, T, F)
+  # replace outlier values with NAs in a new variable 
+  data_chunk$cort_values_fixed_no_outliers <- ifelse(data_chunk$cort_mark_outliers == T, NA, data_chunk$cort_values_fixed)
+  print(nrow(data_chunk))
+  # count how many NAs there are - how many outliers there are.
+  N_outliers <- sum(data_chunk$cort_mark_outliers, na.rm = TRUE)
+  # save the N in your outlier table at the correct index 
+  outlier_info$N_outliers[i] <- N_outliers 
+  # save this into a new dataframe 
+  cort_cleaned2.mark.outliers <- rbind(cort_cleaned2.mark.outliers, data_chunk) 
+} 
+
+#outlier_info
+
+#head(cort_cleaned2.mark.outliers)
+```
+
+## save this table for later! 
+```{r, evaluate = F}
+# save the outlier table!! 
+write.table(outlier_info, "../../../data/1_cort_data/Marta_version_Cortisol_outlier_info_table.txt", col.names = T, quote= F)
+
+```
+
+
+# Remove the outliers from your cleaned data and save
+```{r, evaluate = F}
+nrow(cort_cleaned2)
+# first, we have to subset out the outliers (right now they are just marked)
+cort_cleaned.no.outliers <- subset(cort_cleaned2.mark.outliers, !is.na(cort_values_fixed_no_outliers))
+
+save(cort_cleaned.no.outliers, file = "../../../data/1_cort_data/1A_Long_cort_removed_outliers.Rdata")
+
+
+```
