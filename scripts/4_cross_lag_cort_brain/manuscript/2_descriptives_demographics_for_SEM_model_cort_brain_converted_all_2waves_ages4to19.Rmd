@@ -1,0 +1,250 @@
+---
+title: "Cross lag demographics for cort-brain"
+author: "Michelle.VanTieghem"
+date: "Jan 23, 2019"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+get useful packages
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+
+# 1) prep data 
+
+## load data 
+```{r, warning = F}
+
+# this one compiled more subjects with 2 waves of data. 
+load("../../../data/5_SEM_cross_lag_data/cleaned_all_2wave_cort_brain_wide_format_ages4to19.Rdata")
+nrow(df_wide)
+```
+
+## fix group 
+```{r}
+df_wide$GROUP <- with(df_wide, as.factor(ifelse(IDENT_SUBTYPE == 0, "COMP", "PI")))
+df_wide$IDENT_SUBTYPE <- as.numeric(as.character(df_wide$IDENT_SUBTYPE))
+names(df_wide)
+```
+
+
+## how many T2 scans are on different scanner?
+```{r}
+
+table_T1_scanner <-df_wide %>%
+  group_by(scanner_wave1) %>%
+  dplyr::summarize(N = n())
+table_T1_scanner
+save(table_T1_scanner, file = "tables/T1_scanner_difference.Rdata")
+
+table_T2_scanner <-df_wide %>%
+  group_by(scanner_wave2) %>%
+  dplyr::summarize(N = n())
+table_T2_scanner
+save(table_T2_scanner, file = "tables/T2_scanner_difference.Rdata")
+
+```
+
+## batch differences in cort
+
+```{r}
+
+table_T1_batch <-df_wide %>%
+  group_by(cort_batch_wave1) %>%
+  dplyr::summarize(N = n())
+table_T1_batch
+save(table_T1_batch, file = "tables/T1_cort_batches.Rdata")
+
+table_T2_scanner <-df_wide %>%
+  group_by(cort_batch_wave2) %>%
+  dplyr::summarize(N = n())
+table_T2_scanner
+save(table_T2_scanner, file = "tables/T2_cort_batches.Rdata")
+
+```
+
+
+# 2) more data cleaning
+## rescale variables 
+```{r}
+df_wide$Amyg_wave1_rs <- df_wide$Amyg_wave1/100
+df_wide$Amyg_wave2_rs <- df_wide$Amyg_wave2/100
+df_wide$Hipp_wave1_rs <- df_wide$Hipp_wave1/100
+df_wide$Hipp_wave2_rs <- df_wide$Hipp_wave2/100
+# ***NOTE*** MUST RESCALE ICV by 100,000 here to have models converge!!
+df_wide$ICV_wave1_rs <- df_wide$ICV_wave1 /100000
+df_wide$ICV_wave2_rs <- df_wide$ICV_wave2 /100000
+```
+
+## diagnostic plots 
+```{r}
+hist(df_wide$ICV_wave1)
+#remove this outlier.
+
+hist(df_wide$ICV_wave2)
+hist(df_wide$Hipp_wave1)
+hist(df_wide$Hipp_wave2)
+hist(df_wide$waking_wave1)
+hist(df_wide$waking_wave2)
+```
+
+
+## center variables 
+```{r}
+df_wide$IDENT_SUBTYPE.c <- with(df_wide, ifelse(IDENT_SUBTYPE == 0, -0.5, 0.5))
+df_wide$sex.c <- with(df_wide, ifelse(sex == 0, -0.5, 0.5))
+
+# AGE variables.
+df_wide$Age_wave1.c <- df_wide$Age_wave1 - mean(df_wide$Age_wave1, na.rm = T)
+df_wide$Age_wave2.c <- df_wide$Age_wave2 - mean(df_wide$Age_wave2, na.rm = T)
+
+df_wide$age_split10 <- as.factor(ifelse(df_wide$Age_wave1 < 10, "Child", "Teen"))
+df_wide$age_split13 <- as.factor(ifelse(df_wide$Age_wave1 < 13, "Child", "Teen"))
+
+
+df_wide$waking_wave1.c <- df_wide$waking_wave1 - mean(df_wide$waking_wave1, na.rm = T)
+df_wide$waking_wave2.c <- df_wide$waking_wave2 - mean(df_wide$waking_wave2, na.rm = T)
+
+df_wide$Hipp_wave1.c <- df_wide$Hipp_wave1 - mean(df_wide$Hipp_wave1, na.rm = T)
+df_wide$Hipp_wave2.c <- df_wide$Hipp_wave2 - mean(df_wide$Hipp_wave2, na.rm = T)
+df_wide$Amyg_wave1.c <- df_wide$Amyg_wave1 - mean(df_wide$Amyg_wave1, na.rm = T)
+df_wide$Amyg_wave2.c <- df_wide$Amyg_wave2 - mean(df_wide$Amyg_wave2, na.rm = T)
+df_wide$ICV_wave1.c <- df_wide$ICV_wave1 - mean(df_wide$ICV_wave1, na.rm = T)
+df_wide$ICV_wave2.c <- df_wide$ICV_wave2 - mean(df_wide$ICV_wave2, na.rm = T)
+
+
+df_wide$Amyg_wave1_rs.c <- df_wide$Amyg_wave1_rs - mean (df_wide$Amyg_wave1_rs, na.rm =T)
+df_wide$Amyg_wave2_rs.c <- df_wide$Amyg_wave2_rs - mean(df_wide$Amyg_wave2_rs, na.rm =T)
+df_wide$Hipp_wave1_rs.c <- df_wide$Hipp_wave1_rs - mean (df_wide$Hipp_wave1_rs, na.rm =T)
+df_wide$Hipp_wave2_rs.c <- df_wide$Hipp_wave2_rs - mean(df_wide$Hipp_wave2_rs, na.rm =T)
+df_wide$ICV_wave1_rs.c <- df_wide$ICV_wave1_rs - mean (df_wide$ICV_wave1_rs, na.rm =T)
+df_wide$ICV_wave2_rs.c <- df_wide$ICV_wave2_rs - mean (df_wide$ICV_wave2_rs, na.rm =T)
+
+df_wide$waking_wave1.c <- df_wide$waking_wave1 - mean (df_wide$waking_wave1, na.rm =T)
+df_wide$waking_wave2.c <- df_wide$waking_wave2 - mean (df_wide$waking_wave2, na.rm =T)
+
+```
+
+## calculate age change between wavess
+```{r}
+
+df_wide$Age_change <- df_wide$Age_wave2 - df_wide$Age_wave1
+hist(df_wide$Age_change)
+```
+
+
+# 3) Demographics 
+ what is N for each path?  (with new larger 2 tp )
+ 
+## Path a (T1 only)
+
+```{r}
+patha_table <- df_wide %>%
+  filter(!is.na(waking_wave1) & !is.na(Amyg_wave1) & !is.na(Hipp_wave1)) %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(n= n(), 
+            mean_age = mean(Age_wave1, na.rm = T), 
+            sd_age = sd(Age_wave1, na.rm = T),
+            min_age = min(Age_wave1, na.rm = T),
+            max_age = max(Age_wave1, na.rm = T),
+            mean_age_change =  " ",
+            sd_age_change =  " ",
+            min_age_change =  " ", 
+            max_age_change =  " ",
+            prop_female = mean(sex, na.rm = T))
+patha_table$path <- 'T1'
+```
+
+## path b (T2 only)
+```{r}
+pathb_table <- df_wide %>%
+  filter(!is.na(waking_wave2) & !is.na(Amyg_wave2)) %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(n= n(), 
+            mean_age = mean(Age_wave2, na.rm = T), 
+            sd_age = sd(Age_wave1, na.rm = T),
+            min_age = min(Age_wave2, na.rm = T),
+            max_age = max(Age_wave2, na.rm = T),
+            mean_age_change = " ",
+            sd_age_change =  " ",
+            min_age_change =  " ", 
+            max_age_change =  " ",
+            prop_female = mean(sex, na.rm = T))
+pathb_table$path <- 'T2'
+```
+
+## path 1
+```{r}
+path1_table <- df_wide %>%
+  filter(!is.na(waking_wave2) & !is.na(Amyg_wave1_rs.c) & !is.na(Hipp_wave1_rs.c)) %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(n= n(), 
+            mean_age = mean(Age_wave1, na.rm = T), 
+            sd_age = sd(Age_wave1, na.rm = T),
+            min_age = min(Age_wave1, na.rm = T),
+            max_age = max(Age_wave1, na.rm = T),
+            mean_age_change =  mean((Age_wave2 - Age_wave1), na.rm = T), 
+            sd_age_change =  sd((Age_wave2 - Age_wave1), na.rm = T),
+            min_age_change =  min((Age_wave2- Age_wave1), na.rm = T), 
+            max_age_change=  max((Age_wave2 - Age_wave1), na.rm = T),
+            prop_female = mean(sex, na.rm = T))
+path1_table$path <- 'Path1'
+```
+
+## path2
+```{r}
+path2_table <- df_wide %>%
+  filter(!is.na(waking_wave1) & !is.na(Amyg_wave2) & !is.na(Hipp_wave2)) %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(n= n(), 
+            mean_age = mean(Age_wave1, na.rm = T), 
+            sd_age = sd(Age_wave1, na.rm = T),
+            min_age = min(Age_wave1, na.rm = T),
+            max_age = max(Age_wave1, na.rm = T),
+            mean_age_change = mean((Age_wave2 - Age_wave1), na.rm = T), 
+            sd_age_change =  sd((Age_wave2 - Age_wave1), na.rm = T),
+            min_age_change =  min((Age_wave2- Age_wave1), na.rm = T), 
+            max_age_change =  max((Age_wave2 - Age_wave1), na.rm = T),
+            prop_female = mean(sex, na.rm = T))
+path2_table$path <- 'Path2'
+```
+
+## combine into 1 table
+```{r}
+
+path_demo_table <- rbind(patha_table, pathb_table, path1_table, path2_table)
+
+path_demo_table <- path_demo_table %>%
+  rename(N = n, Path = path) %>%
+  mutate(mean_age_change = round(as.numeric(as.character(mean_age_change)), 2),
+         sd_age_change = round(as.numeric(as.character(sd_age_change)), 2),
+         mean_age = round(mean_age,2),
+         sd_age= round(sd_age,2), 
+         Range = paste0(round(min_age,2), "-", round(max_age,2)),
+         prop_female = round(prop_female, 2)) %>%
+    dplyr::select(GROUP, Path, N, mean_age, sd_age, Range, mean_age_change, sd_age_change, prop_female) %>%
+  mutate(Path = ordered(Path ,levels = c("T1", "Path1", "Path2", "T2")))
+
+path_demo_table <- path_demo_table %>% 
+  arrange(GROUP, Path) 
+path_demo_table
+
+
+save(path_demo_table, file = "tables/cort_brain_all_paths_demo_table.Rdata")
+```
+
+
+save cleaned2 data
+```{r}
+save(df_wide, file ="../../../data/5_SEM_cross_lag_data/cleaned2_all_2wave_cort_brain_wide_format_ages4to19.Rdata")
+
+```

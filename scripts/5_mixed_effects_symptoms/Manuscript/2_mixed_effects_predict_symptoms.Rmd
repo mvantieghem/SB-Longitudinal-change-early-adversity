@@ -1,0 +1,449 @@
+---
+title: "Predicting symptoms from hipp, cort, amyg"
+author: "Michelle.VanTieghem"
+date: "August 17, 2018"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+
+```{r, include = F, echo = F, message = F, warning = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+```{r, echo = F}
+######### lmer Version #######
+condslope.lmer.slopes <- function(x, z, c, y){
+#  condslope.lmer( "age1","GROUP", 0, Amyg_piecewise_orig)
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*z
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work.
+  
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+#zx <- paste(z, x, sep = ":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[xz]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+coef4.var <- subset(modtidy, rownames == xz)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, xz])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 2), w1.slope=round(w1.slope, digits = 2),
+            df = subset(modtidy, rownames == x)$df[1],
+            t.val = round(t.val, digits = 2), p.val = round(p.val, digits = 3), 
+            lower95 = round(lower95, digits = 2), 
+            upper95 = round(upper95, digits = 2)))
+}
+
+
+```
+
+
+# load cleaned data
+```{r}
+
+load("../../../data/4_all_data_mixed_effects/CLEANED_ALL_long_cort_symptoms_brain_structure_all_ages_2019-11-12.Rdata")
+```
+
+# prep data
+```{r}
+# check scaling of brain variables 
+
+range(monster_SB_cleaned$ICV_cleaned_rs.c, na.rm = T)
+range(monster_SB_cleaned$Hipp_ave_cleaned_rs.c, na.rm = T)
+```
+
+# correlations among symptoms 
+```{r}
+symptom_vars <- monster_SB_cleaned %>%
+ dplyr::select(RCADS_int_long, RCADS_anx_long, 
+         CBCL_int_long,CBCL_ext_long, CBCL_tot_long)
+
+
+monster_SB_cleaned$Age.c <- monster_SB_cleaned$age - mean(monster_SB_cleaned$age)
+```
+
+# 1) group differences in symptoms 
+
+```{r, warning = F, message = F}
+group_diff_pvalues <- monster_SB_cleaned %>%
+    dplyr::summarize(
+            RCADS_int_T =  summary(lmer(RCADS_int_long ~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 5],
+            RCADS_int_raw =  summary(lmer(RCADS_int_raw_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 5],
+            CBCL_int_T =  summary(lmer(CBCL_int_long~ 
+                             GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 5],
+            CBCL_int_raw =  summary(lmer(CBCL_int_raw_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 5],
+            CBCL_ext_T =  summary(lmer(CBCL_ext_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 5],
+            CBCL_ext_raw =  summary(lmer(CBCL_ext_raw_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 5]
+
+    )
+
+group_diff_coefs <- monster_SB_cleaned %>%
+    dplyr::summarize(
+            RCADS_int_T =  summary(lmer(RCADS_int_long ~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 1],
+            RCADS_int_raw =  summary(lmer(RCADS_int_raw_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 1],
+            CBCL_int_T =  summary(lmer(CBCL_int_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 1],
+            CBCL_int_raw =  summary(lmer(CBCL_int_raw_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 1],
+            CBCL_ext_T =  summary(lmer(CBCL_ext_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 1],
+            CBCL_ext_raw =  summary(lmer(CBCL_ext_raw_long~ 
+                               GROUP.c + Age.c + 
+                 sex.c  + meds_by_wave + ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned))$coefficients[2, 1]
+
+    )
+
+group_diff_table <- rbind(group_diff_coefs, group_diff_pvalues)
+group_diff_table$value <- c("beta", "pvalue")
+
+group_diff_table %>% 
+  dplyr::select(value, RCADS_int_T, RCADS_int_raw, CBCL_int_T, CBCL_int_raw, CBCL_ext_T, CBCL_ext_raw)
+
+save(group_diff_table,file= "tables/group_differences_symptom_categories.Rdata")
+
+```
+
+
+# 2) plots of hipp with symptoms
+## raw 
+
+```{r}
+
+ggplot(monster_SB_cleaned, aes(x = Hipp_ave, y = RCADS_int_long)) + 
+  geom_point(aes(color = GROUP))  + geom_smooth(method = "lm", color= "black") + theme_classic() +
+  geom_line(aes(group = IDENT_SUBID, color = GROUP))
+
+
+```
+
+## cleaned (removed outliers)
+```{r}
+
+ggplot(monster_SB_cleaned, aes(x = Hipp_ave_cleaned, y = RCADS_int_long_cleaned)) + 
+  geom_point(aes(color = GROUP))  + geom_smooth(method = "lm", color= "black") + theme_classic() +
+  geom_line(aes(group = IDENT_SUBID, color = GROUP))
+
+
+```
+
+
+# plots of amyg with symptoms
+## raw 
+```{r}
+
+ggplot(monster_SB_cleaned, aes(x = Amyg_ave, y = RCADS_int_long)) + 
+  geom_point(aes(color = GROUP))  + geom_smooth(method = "lm", color= "black") + theme_classic() +
+  geom_line(aes(group = IDENT_SUBID, color = GROUP))
+
+
+```
+
+## cleaned (removed outliers)
+```{r}
+
+ggplot(monster_SB_cleaned, aes(x = Amyg_ave_cleaned, y = RCADS_int_long_cleaned)) + 
+  geom_point(aes(color = GROUP))  + geom_smooth(method = "lm", color= "black") + theme_classic() +
+  geom_line(aes(group = IDENT_SUBID, color = GROUP))
+
+```
+
+# plot cort with symptoms
+## raw
+```{r}
+
+ggplot(monster_SB_cleaned, aes(x = waking, y = RCADS_int_long)) + 
+  geom_point(aes(color = GROUP))  + geom_smooth(method = "lm", color= "black") + theme_classic() +
+  geom_line(aes(group = IDENT_SUBID, color = GROUP))
+
+```
+
+## cleaned (removed symptoms)
+```{r}
+
+ggplot(monster_SB_cleaned, aes(x = waking_cleaned, y = RCADS_int_long_cleaned)) + 
+  geom_point(aes(color = GROUP))  + geom_smooth(method = "lm", color= "black") + theme_classic() +
+  geom_line(aes(group = IDENT_SUBID, color = GROUP))
+
+```
+
+
+# 3) main effects of hipp, amyg, cort symptoms
+## cleaned vars, main effects model
+```{r}
+mod1 <- lmerTest::lmer(RCADS_int_long_cleaned ~ Hipp_ave_cleaned_rs.c + 
+                         Amyg_ave_cleaned_rs.c +  
+                               GROUP.c + Age.c + scanner_confound + 
+                 sex.c  + meds_by_wave +  waking_cleaned.c +  
+                        ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned)
+summary(mod1)
+main_effects_RCADS <- mod1
+save(main_effects_RCADS, file = "model_output/final_symptom_model_main_effects.Rdata")
+
+```
+
+### plot the main effects of hipp
+note: plotting separate lines by group, but not running interaction! \
+so lines will be parallel.
+
+```{r}
+# graph the model and confirm the post-hoc tests!! 
+effect_hipp_RCADS <- as.data.frame(effect("Hipp_ave_cleaned_rs.c:GROUP.c", mod1,
+                                          confint=TRUE, xlevels = list(
+       Hipp_ave_cleaned_rs.c = seq(min(monster_SB_cleaned$Hipp_ave_cleaned_rs.c, na.rm = T), 
+              max(monster_SB_cleaned$Hipp_ave_cleaned_rs.c, na.rm = T), 1)))) %>% 
+  filter(GROUP.c == 0.5 | GROUP.c == -0.5) %>%
+  mutate(GROUP = ifelse(GROUP.c < 0, "COMP", "PI"))
+
+Hipp_RCADS_effect_plot <- ggplot(effect_hipp_RCADS,
+                                     aes(x = Hipp_ave_cleaned_rs.c, y = fit, color = GROUP)) +
+  geom_ribbon(aes(ymin=lower, ymax=upper, fill = GROUP), alpha =0.1, color = NA) +
+   geom_line(size = 1) + ylim(30, 70) +
+   theme_classic() + my_colors + my_colors2 + ylab ("Internalizing Symptoms") + 
+   xlab(bquote('Mean-centered Hippocampal Volume '*(mmm/100)^3*''))
+
+pdf(file = "figures/Hippocampus_symptoms_main_Effect.pdf", width = 4, height = 4)
+Hipp_RCADS_effect_plot
+dev.off() 
+
+
+Hipp_RCADS_effect_raw  <- Hipp_RCADS_effect_plot +  
+  geom_point(data = monster_SB_cleaned, aes(x = Hipp_ave_cleaned_rs.c, y = RCADS_int_long, color = GROUP), alpha = 0.2, size = 1) + theme(legend.position=c(0.85, 0.85), legend.box.background = element_rect(colour = "black"),legend.title = element_blank(), legend.margin=margin(c(1,5,1,1))) +  geom_line(data = monster_SB_cleaned, aes(x = Hipp_ave_cleaned_rs.c, y = RCADS_int_long, group = IDENT_SUBID, color = GROUP), alpha = 0.2)
+
+#pdf(file = "figures/Hipp_symptoms_main_Effect_with_raw_CI.pdf", width = 4, height = 4)
+Hipp_RCADS_effect_raw
+#dev.off() 
+```
+
+```{r}
+#ppt_test2 <- read_pptx() %>%
+ # add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  #ph_with_vg(code = print(Hipp_RCADS_effect_raw)) %>%
+#  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/Hipp_symptoms_main_Effect_with_raw_CI.pptx")
+```
+
+
+### plot the main effect of amyg
+```{r}
+
+effect_amyg_RCADS_int <- as.data.frame(effect("Amyg_ave_cleaned_rs.c:GROUP.c", mod1,  confint=TRUE, xlevels = list(
+       Amyg_ave_cleaned_rs.c = c(seq(min(monster_SB_cleaned$Amyg_ave_cleaned_rs.c, na.rm = T), 
+              max(monster_SB_cleaned$Amyg_ave_cleaned_rs.c, na.rm = T), 1),
+       max(monster_SB_cleaned$Amyg_ave_cleaned_rs.c, na.rm = T))))) %>% 
+  filter(GROUP.c == 0.5 | GROUP.c == -0.5) %>%
+  mutate(GROUP = ifelse(GROUP.c < 0, "COMP", "PI"))
+
+amyg_RCADS_effect_plot <- ggplot(effect_amyg_RCADS_int,
+                          aes(x = Amyg_ave_cleaned_rs.c, y = fit, color= GROUP)) +
+  geom_ribbon(aes(ymin=lower, ymax=upper, fill = GROUP), color = NA, alpha =0.1) +
+   geom_line(size = 1) + ylim(30, 70) +
+   theme_classic() + my_colors + my_colors2 + ylab ("Internalizing Symptoms") + 
+   xlab(bquote('Mean-centered Amygdala Volume '*(mm/100)^3*''))
+
+
+pdf(file = "figures/Amygdala_symptoms_main_Effect.pdf", width = 4, height = 4)
+amyg_RCADS_effect_plot
+dev.off() 
+
+amyg_RCADS_effect_raw <- amyg_RCADS_effect_plot + 
+  geom_point(data = monster_SB_cleaned, aes(x = Amyg_ave_cleaned_rs.c, y = RCADS_int_long, color = GROUP), alpha = 0.2, size = 1) +  theme(legend.position="None") + ylab ("") + 
+  geom_line(data = monster_SB_cleaned, aes(x = Amyg_ave_cleaned_rs.c, y = RCADS_int_long, group = IDENT_SUBID, color = GROUP), alpha = 0.2)
+
+#pdf(file = "figures/Amygdala_symptoms_main_Effect_with_raw_CI.pdf", width = 4, height = 4) 
+amyg_RCADS_effect_raw 
+#dev.off() 
+```
+```{r}
+#ppt_test2 <- read_pptx() %>%
+ # add_slide(layout = "Title and Content", master = "Office Theme") %>%
+#  ph_with_vg(code = print(amyg_RCADS_effect_raw)) %>%
+#  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/Amyg_symptoms_main_Effect_with_raw_CI.pptx")
+```
+
+
+### option 1: combine with all age ranges 
+```{r}
+library(gridExtra)
+pdf(file = "figures/Amyg_Hipp_RCADS_main_effects_panel_pretty.pdf", width = 6, height = 4)
+grid.arrange(Hipp_RCADS_effect_raw, amyg_RCADS_effect_raw, ncol = 2)
+dev.off()
+```
+
+SAVING TO POWERPT 
+```{r}
+#ppt_test2 <- read_pptx() %>%
+  #add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  #ph_with_vg(code = print(grid.arrange(Hipp_RCADS_effect_raw, amyg_RCADS_effect_raw, ncol = 2))) %>%
+ # print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/Amyg_Hipp_symptoms_panel_all_ages.pptx")
+```
+
+# 4) Test cort interactions
+## 4a) cort x group x age
+```{r}
+mod2 <- lmerTest::lmer(RCADS_int_long_cleaned ~ Hipp_ave_cleaned_rs.c + Amyg_ave_cleaned_rs.c + 
+                               GROUP.c *waking_cleaned*Age.c + 
+                 sex.c  + meds_by_wave +  scanner_confound + 
+                        ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned)
+summary(mod2)
+
+# save this model better
+cort_int_RCADS <- mod2 
+save(cort_int_RCADS, file = "model_output/final_symptom_model_cort_int.Rdata")
+
+```
+
+
+### post-hoc to parse apart 3 way interaction
+calculate slopes for comparisons at diff ages
+```{r}
+sd_age <- sd(monster_SB_cleaned$age)
+mean_age <- mean(monster_SB_cleaned$age)
+
+comp_slope_2agelwr <- data.frame(age = mean_age - 2*sd_age, condslope.lmer.slopes("waking_cleaned", "Age.c", -2*sd_age, cort_int_RCADS))
+
+comp_slope_1agelwr <- data.frame(age = mean_age - 1*sd_age, condslope.lmer.slopes("waking_cleaned", "Age.c", -1*sd_age, cort_int_RCADS))
+
+comp_slope_mean_age <- data.frame(age = mean_age, condslope.lmer.slopes("waking_cleaned", "Age.c", 0, cort_int_RCADS))
+
+comp_slope_1ageupr <- data.frame(age = mean_age + 1*sd_age, condslope.lmer.slopes("waking_cleaned", "Age.c", 1*sd_age,cort_int_RCADS))
+
+comp_slope_2ageupr <- data.frame(age = mean_age + 2*sd_age, condslope.lmer.slopes("waking_cleaned", "Age.c", 2*sd_age,cort_int_RCADS))
+```
+
+### calculate slopes for PI at different ages
+```{r}
+monster_SB_cleaned$GROUP_PIref <- ifelse(monster_SB_cleaned$IDENT_SUBTYPE == 0, 1, 0)
+summary(as.factor(monster_SB_cleaned$GROUP_PIref))
+summary(monster_SB_cleaned$GROUP) # check
+
+cort_int_RCADS2 <- lmerTest::lmer(RCADS_int_long_cleaned ~ Hipp_ave_cleaned_rs.c + Amyg_ave_cleaned_rs.c + 
+                               GROUP_PIref *waking_cleaned* Age.c + 
+                 sex.c  + meds_by_wave + scanner_confound +  
+                        ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned)
+
+PI_slope_2agelwr <- data.frame(age = mean_age - 2*sd_age, condslope.lmer.slopes("waking_cleaned", "Age.c", -2*sd_age, cort_int_RCADS2))
+
+PI_slope_1agelwr <- data.frame(age = mean_age - 1*sd_age, condslope.lmer.slopes("waking_cleaned", "Age.c", -1*sd_age, cort_int_RCADS2))
+
+PI_slope_mean_age <- data.frame(age = mean_age, condslope.lmer.slopes("waking_cleaned", "Age.c", 0, cort_int_RCADS2))
+
+PI_slope_1ageupr <- data.frame(age = mean_age + 1*sd_age, condslope.lmer.slopes("waking_cleaned", "Age.c", 1*sd_age, cort_int_RCADS2))
+
+PI_slope_2ageupr <- data.frame(age = mean_age + 2*sd_age, condslope.lmer.slopes("waking_cleaned", "Age.c", 2*sd_age, cort_int_RCADS2))
+```
+
+### merge PI and comparison post-hocs together into table
+according to this, none of the individual slope things are significant. 
+```{r}
+posthoc_table <- rbind(comp_slope_2agelwr, comp_slope_1agelwr, comp_slope_mean_age, 
+                       comp_slope_1ageupr, comp_slope_2ageupr, 
+                       PI_slope_2agelwr, PI_slope_1agelwr, PI_slope_mean_age,
+                       PI_slope_1ageupr, PI_slope_2ageupr)
+
+posthoc_table <- posthoc_table %>%
+  dplyr::select(-w0.intercept) %>%
+  mutate(GROUP = c(rep("COMP", 5), rep("PI", 5)),
+         age2 = round(age ,2)) %>%
+  dplyr::select(GROUP, age2, w1.slope, t.val, p.val, lower95, upper95) %>%
+  filter(age2 > 4 & age2 < 19)
+names(posthoc_table) <- c( "GROUP", "Age (years)", "Waking cortisol slope", "t value", "p value", "lower 95% CI", "upper 95 CI%")
+posthoc_waking_symptoms_table <- posthoc_table 
+posthoc_waking_symptoms_table
+save(posthoc_waking_symptoms_table, file = "model_output/final_model_wakingXgroupXage_posthoc.Rdata")
+```
+
+## 4b) Cort x Age X group (without imaging, so larger sample of kids)
+still no significant PI adolecent effect, but 3 way interaction still sig. 
+
+```{r}
+load("../../../data/4_all_data_mixed_effects/CLEANED_ALL_long_cort_symptoms_only)4to19.Rdata")
+
+```
+
+## cleaned and log cort x group x age
+```{r}
+mod7 <- lmerTest::lmer(RCADS_int_long_cleaned ~ 
+                               GROUP *waking_cleaned* Age.c + # meds_by_wave +  
+                 sex.c  + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned)
+summary(mod7) # Number of obs: 221, groups:  IDENT_SUBID, 128 
+# Number of obs: 223, groups:  IDENT_SUBID, 129... OK so we added 1 subject and 2 observations.
+```
+
+
+## Add batch to the model. 
+```{r}
+mod7_batch <- lmerTest::lmer(RCADS_int_long_cleaned ~ batch+ 
+                               GROUP *waking_cleaned* Age.c + # meds_by_wave +  
+                 sex.c  + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned)
+summary(mod7_batch) 
+```
+
+
+## Test: does cort interact with hipp or amyg? NS
+```{r}
+mod3 <- lmerTest::lmer(RCADS_int_long_cleaned ~ Hipp_ave_cleaned_rs.c*waking_cleaned +
+                         Amyg_ave_cleaned_rs.c*waking_cleaned + 
+                               GROUP.c + waking_cleaned + Age.c + 
+                 sex.c  + meds_by_wave +  scanner_confound + 
+                        ICV_cleaned_rs.c + (1 | IDENT_SUBID), 
+                 data = monster_SB_cleaned)
+summary(mod3)
+
+
+```
+

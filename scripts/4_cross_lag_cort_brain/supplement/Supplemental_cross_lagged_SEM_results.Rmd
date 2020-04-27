@@ -1,0 +1,345 @@
+---
+title: "supplemental results for cross-lag models"
+author: "Michelle.VanTieghem"
+date: "Jan 23, 2019"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# Readme
+supplemental analyses for cross-lag SEM \
+Group interactions in cross-lag paths 
+
+
+get useful packages
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+# prep 
+## load data 
+```{r}
+
+# this one compiled more subjects with 2 waves of data. 
+load("../../../data/5_SEM_cross_lag_data/cleaned2_all_2wave_cort_brain_wide_format_ages4to19.Rdata")
+nrow(df_wide)
+```
+
+## function for chi-square test later
+```{r}
+ # is p < 0.05? test with the chi-square distribution for this DF
+chi_square_test <- function(chi_sq_diff, df_diff) {
+  if (chi_sq_diff > qchisq(.95, df=df_diff)){
+    p  = '< 0.05'
+  } else{
+    p = '> 0.05' 
+  }
+  return(list(chi_square_difference = chi_sq_diff, df_difference = df_diff, p.value = p))
+}
+
+```
+
+## load main models to compare later
+```{r}
+
+
+load("../manuscript/model_output/hipp_waking_cross_lagged_model_main_effects.Rdata")
+
+fit_measures <- data.frame(fitMeasures(hipp_mod1)) 
+names(fit_measures) <- "value"
+fit_measures$metric <- rownames(fit_measures) 
+fit_measures$model <- "hipp_mod1"
+
+hipp_mod1_fit_measures <- fit_measures %>%
+  spread(metric, value)
+
+```
+
+```{r}
+
+load("../manuscript/model_output/amyg_waking_cross_lagged_model_main_effects.Rdata")
+
+fit_measures <- data.frame(fitMeasures(amyg_mod1)) 
+names(fit_measures) <- "value"
+fit_measures$metric <- rownames(fit_measures) 
+fit_measures$model <- "amyg_mod1"
+
+amyg_mod1_fit_measures <- fit_measures %>%
+  spread(metric, value)
+
+```
+
+# 1) Hippocampus models
+
+## GROUP interaction with cort 
+### make interaction regressors 
+```{r}
+# here the comps are coded as 0, PIs as 1 
+# how do I interpret the direction of this interaction? 
+
+df_wide$Hipp_wave1_rs.cXIDENT_SUBTYPE <- with(df_wide, Hipp_wave1_rs.c*IDENT_SUBTYPE)
+df_wide$waking_wave1.cXIDENT_SUBTYPE <- with(df_wide, waking_wave1.c*IDENT_SUBTYPE)
+df_wide$age_wave1.cXIDENT_SUBTYPE <- with(df_wide, Age_wave1.c*IDENT_SUBTYPE)
+# here the comps are coded as 0, PIs as 1 
+# how do I interpret the direction of this interaction? 
+df_wide$IDENT_SUBTYPE_COMP1 <- ifelse(df_wide$IDENT_SUBTYPE== 0, 1, 0)
+
+df_wide$Hipp_wave1_rs.cXIDENT_SUBTYPE1 <- with(df_wide, Hipp_wave1_rs.c*IDENT_SUBTYPE_COMP1)
+df_wide$waking_wave1.cXIDENT_SUBTYPE1 <- with(df_wide, waking_wave1.c*IDENT_SUBTYPE_COMP1)
+```
+
+
+could not include all of the paths for the model to converge
+fit statistics are not very good! 
+```{r }
+model= 
+'
+#Regression
+Hipp_wave2_rs.c ~ waking_wave1.cXIDENT_SUBTYPE + Hipp_wave1_rs.c + waking_wave1.c + Age_wave2.c + IDENT_SUBTYPE  + ICV_wave2_rs.c + sex.c + scanner_wave2
+waking_wave2.c ~ Hipp_wave1_rs.cXIDENT_SUBTYPE + Hipp_wave1_rs.c + waking_wave1.c + Age_wave2.c + IDENT_SUBTYPE  + sex.c 
+
+Hipp_wave1_rs.c ~ Age_wave1.c + IDENT_SUBTYPE  + ICV_wave1_rs.c + sex.c 
+waking_wave1.c ~ Age_wave1.c + IDENT_SUBTYPE + sex.c 
+
+# covariance
+waking_wave1.c ~~ Hipp_wave1_rs.c
+waking_wave2.c ~~ Hipp_wave2_rs.c
+
+# time 1 - time 2 things
+ICV_wave1_rs.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Age_wave2.c 
+
+# correlations at each time point 
+Age_wave1.c ~ ICV_wave1_rs.c 
+Age_wave2.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Hipp_wave1_rs.c 
+Age_wave2.c ~ Hipp_wave2_rs.c
+Age_wave1.c ~ waking_wave1.c
+Age_wave2.c ~ waking_wave2.c
+#sex.c	~	Hipp_wave1_rs.c		
+
+#ICV_wave1_rs.c	~	Hipp_wave1_rs.c	
+#ICV_wave2_rs.c	~	Hipp_wave2_rs.c		
+
+#IDENT_SUBTYPE	~	Hipp_wave1_rs.c
+#IDENT_SUBTYPE ~ sex.c 
+#IDENT_SUBTYPE ~ ICV_wave1_rs.c
+'
+
+# run the model adn print output
+hipp_mod1_group <- sem(model, data=df_wide, fixed.x=F, missing='fiml')
+summary(hipp_mod1_group , fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)[1]
+
+fit_measures <- data.frame(fitMeasures(hipp_mod1_group)) 
+names(fit_measures) <- "value"
+fit_measures$metric <- rownames(fit_measures) 
+fit_measures$model <- "hipp_mod1_group"
+
+hipp_mod1_group_fit_measures <- fit_measures %>%
+  spread(metric, value)
+
+save(hipp_mod1_group, file = "model_output/hipp_waking_cross_lagged_model_group_int.Rdata")
+
+```
+
+
+## comparison of hipp models
+```{r}
+
+hipp_model_comparisons <- rbind(hipp_mod1_fit_measures, hipp_mod1_group_fit_measures)
+
+save(hipp_model_comparisons, file = "model_output/hipp_waking_model_fit_indices.Rdata")
+```
+
+## testing whether adding group interaction is better or worse model fit
+```{r}
+hipp_mod1_fit_measures$chisq # model without scanner has better (lower) chi-square
+hipp_mod1_group_fit_measures$chisq # model with scanner has higher chi-square 
+
+# is this difference significant?
+diff_chi_sq <- abs(hipp_mod1_fit_measures$chisq - hipp_mod1_group_fit_measures$chisq)
+diff_df <-  abs(hipp_mod1_fit_measures$df - hipp_mod1_group_fit_measures$df)
+
+# yes!
+chi_square_hipp_group_result <- chi_square_test(diff_chi_sq, diff_df)
+chi_square_hipp_group_result
+save(chi_square_hipp_group_result, file = "model_output/chi_square_hipp_group_result.Rdata")
+```
+
+# 2) amygdala models 
+
+## GROUP interaction with cort 
+### make interaction regressors 
+```{r}
+# here the comps are coded as 0, PIs as 1 
+# how do I interpret the direction of this interaction? 
+
+df_wide$Amyg_wave1_rs.cXIDENT_SUBTYPE <- with(df_wide, Amyg_wave1_rs.c*IDENT_SUBTYPE)
+df_wide$waking_wave1.cXIDENT_SUBTYPE <- with(df_wide, waking_wave1.c*IDENT_SUBTYPE)
+df_wide$age_wave1.cXIDENT_SUBTYPE <- with(df_wide, Age_wave1.c*IDENT_SUBTYPE)
+# here the comps are coded as 0, PIs as 1 
+# how do I interpret the direction of this interaction? 
+df_wide$IDENT_SUBTYPE_COMP1 <- ifelse(df_wide$IDENT_SUBTYPE== 0, 1, 0)
+
+df_wide$Amyg_wave1_rs.cXIDENT_SUBTYPE1 <- with(df_wide, Amyg_wave1_rs.c*IDENT_SUBTYPE_COMP1)
+df_wide$waking_wave1.cXIDENT_SUBTYPE1 <- with(df_wide, waking_wave1.c*IDENT_SUBTYPE_COMP1)
+```
+
+Also would not converge without omitting additional paths
+note: had to remove a coefficient to converge, so removed #Age_wave2.c ~ waking_wave2.c
+```{r }
+model= 
+'
+#Regression
+Amyg_wave2_rs.c ~ waking_wave1.cXIDENT_SUBTYPE + Amyg_wave1_rs.c + waking_wave1.c + Age_wave2.c + IDENT_SUBTYPE  + ICV_wave2_rs.c + sex.c + scanner_wave2
+waking_wave2.c ~ Amyg_wave1_rs.cXIDENT_SUBTYPE + Amyg_wave1_rs.c + waking_wave1.c + Age_wave2.c + IDENT_SUBTYPE  +  sex.c 
+
+Amyg_wave1_rs.c ~ Age_wave1.c + IDENT_SUBTYPE  + ICV_wave1_rs.c + sex.c 
+waking_wave1.c ~ Age_wave1.c + IDENT_SUBTYPE + sex.c 
+
+# covariance
+waking_wave1.c ~~ Amyg_wave1_rs.c
+waking_wave2.c ~~ Amyg_wave2_rs.c
+
+# time 1 - time 2 things
+ICV_wave1_rs.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Age_wave2.c 
+
+# correlations at each time point 
+Age_wave1.c ~ ICV_wave1_rs.c 
+Age_wave2.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Amyg_wave1_rs.c 
+Age_wave2.c ~ Amyg_wave2_rs.c
+Age_wave1.c ~ waking_wave1.c
+#Age_wave2.c ~ waking_wave2.c
+#sex.c	~	Amyg_wave1_rs.c		
+
+#ICV_wave1_rs.c	~	Amyg_wave1_rs.c	
+#ICV_wave2_rs.c	~	Amyg_wave2_rs.c		
+
+#IDENT_SUBTYPE	~	Amyg_wave1_rs.c
+#IDENT_SUBTYPE ~ sex.c 
+#IDENT_SUBTYPE ~ ICV_wave1_rs.c
+
+'
+
+amyg_mod1_group <- sem(model, data=df_wide, fixed.x=F, missing='fiml')
+fit_measures <- data.frame(fitMeasures(hipp_mod1_group)) 
+names(fit_measures) <- "value"
+fit_measures$metric <- rownames(fit_measures)
+fit_measures$model <- "amyg_mod1_group"
+
+amyg_mod1_group_fit_measures <- fit_measures %>%
+  spread(metric, value)
+
+save(amyg_mod1_group, file = "model_output/amyg_waking_cross_lagged_model_group_int.Rdata")
+summary(amyg_mod1_group)
+```
+
+## comparison of Amyg models
+
+```{r}
+
+amyg_model_comparisons <- rbind(amyg_mod1_fit_measures, amyg_mod1_group_fit_measures)
+save(amyg_model_comparisons, file = "model_output/amyg_waking_model_fit_indices.Rdata")
+
+```
+
+
+## testing whether adding group interaction is better or worse model fit
+```{r}
+amyg_mod1_fit_measures$chisq # model without scanner has better (lower) chi-square
+amyg_mod1_group_fit_measures$chisq # model with scanner has higher chi-square 
+
+# is this difference significant?
+diff_chi_sq <- abs(amyg_mod1_fit_measures$chisq - amyg_mod1_group_fit_measures$chisq)
+diff_df <-  abs(amyg_mod1_fit_measures$df - amyg_mod1_group_fit_measures$df)
+
+# yes!
+chi_square_amyg_group_result <- chi_square_test(diff_chi_sq, diff_df)
+chi_square_amyg_group_result
+save(chi_square_amyg_group_result, file = "model_output/chi_square_amyg_group_result.Rdata")
+```
+
+
+# 3) make figures of sig cross-lag paths
+## regression for each path 
+```{r}
+
+hipp1_waking2 <- lm(waking_wave2.c ~ Hipp_wave1_rs.c + waking_wave1.c + 
+     Age_wave1.c + IDENT_SUBTYPE + ICV_wave1_rs.c + sex.c + scanner_wave2, data = df_wide)
+
+hipp1_waking2_results <- summary(hipp1_waking2)
+hipp1_waking2_results
+save(hipp1_waking2_results, file= "model_output/hipp1_waking2_lm_path_results.Rdata")
+```
+
+
+```{r}
+
+amyg1_waking2 <- lm(waking_wave2.c ~ Amyg_wave1_rs.c + waking_wave1.c + 
+     Age_wave1.c + IDENT_SUBTYPE + ICV_wave1_rs.c + sex.c +
+     scanner_wave2, data = df_wide)
+
+amyg1_waking2_results <- summary(amyg1_waking2)
+amyg1_waking2_results
+save(amyg1_waking2_results, file= "model_output/amyg1_waking2_lm_path_results.Rdata")
+
+```
+
+## plots effect of hipp 
+```{r}
+hipp_effect <- data.frame(effect( "Hipp_wave1_rs.c",hipp1_waking2))
+
+hipp1_waking2_effect_plot <- ggplot(hipp_effect, aes(x = Hipp_wave1_rs.c, y = fit)) +
+ geom_ribbon(aes(ymin=lower, ymax=upper), alpha =0.2, color = NA) +
+   geom_line(size = 1) + 
+   theme_classic() + my_colors + my_colors2 + ylab ("Waking Cortisol T2") + 
+   xlab(bquote('Hippocampal Volume T1 '*(mm/100)^3*''))
+
+hipp1_waking2_effect_raw <- hipp1_waking2_effect_plot + 
+  geom_point(data = df_wide, aes(x = Hipp_wave1_rs.c, y = waking_wave2.c, color = GROUP), 
+             alpha = 0.5, size = 1) +theme(legend.position=c(0.85, 0.15), legend.box.background = element_rect(colour = "black"), legend.title = element_blank(), legend.margin=margin(c(1,5,1,1)))
+
+
+#pdf(file = "figures/Hipp1_waking2_raw_CI.pdf", width = 4, height = 4) 
+hipp1_waking2_effect_raw
+#dev.off() 
+
+```
+
+
+## plot effect of amyg
+```{r}
+
+amyg_effect <- as.data.frame(effect("Amyg_wave1_rs.c", amyg1_waking2, confint=TRUE))
+
+amyg1_waking2_effect_plot <- ggplot(amyg_effect, aes(x = Amyg_wave1_rs.c, y = fit)) +
+ geom_ribbon(aes(ymin=lower, ymax=upper), alpha =0.2, color = NA) +
+   geom_line(size = 1) + 
+   theme_classic() + my_colors + my_colors2 + ylab ("Waking Cortisol T2") + 
+   xlab(bquote('Amygdala Volume T1 '*(mm/100)^3*''))
+
+amyg1_waking2_effect_raw <- amyg1_waking2_effect_plot + 
+  geom_point(data = df_wide, aes(x = Amyg_wave1_rs.c, y = waking_wave2.c, color = GROUP), alpha = 0.5, size = 1) +  theme(legend.position="None") + ylab ("") + xlim(-4, 4)
+
+#pdf(file = "figures/Amyg1_waking2_raw_CI.pdf", width = 4, height = 4) 
+amyg1_waking2_effect_raw  
+#dev.off() 
+
+```
+
+### combine amyg and hipp plots for supplemental material
+```{r}
+library(gridExtra)
+pdf(file = "figures/Amyg1_Hipp1_waking2_panel_pretty.pdf", width = 6, height = 4)
+grid.arrange(hipp1_waking2_effect_raw, amyg1_waking2_effect_raw, ncol = 2)
+dev.off()
+```

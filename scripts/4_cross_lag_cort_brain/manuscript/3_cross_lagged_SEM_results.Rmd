@@ -1,0 +1,349 @@
+---
+title: "Cross-lag SEM cort-brain models"
+author: "Michelle.VanTieghem"
+date: "Jan 23, 2019"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+# Readme
+main analyses for cross-lag SEM \
+Feb 2020: adding wave1/wave2 correlations (not in model) to verify cross-sectional relationships. \
+ ICV is scaled to mm^3/ 100,000  for this model \
+
+
+get useful packages
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+function for chi-square test later
+```{r}
+# is p < 0.05? test with the chi-square distribution for this DF
+chi_square_test <- function(chi_sq_diff, df_diff) {
+  if (chi_sq_diff > qchisq(.95, df=df_diff)){
+    p  = '< 0.05'
+  } else{
+    p = '> 0.05' 
+  }
+  return(list(chi_square_difference = chi_sq_diff, df_difference = df_diff, p.value = p))
+}
+
+```
+
+# load data 
+```{r}
+
+# this one compiled more subjects with 2 waves of data. 
+load("../../../data/5_SEM_cross_lag_data/cleaned2_all_2wave_cort_brain_wide_format_ages4to19.Rdata")
+#names(df_wide)
+
+# check scaling. 
+range(df_wide$ICV_wave1_rs.c, na.rm = T)
+range(df_wide$Hipp_wave2_rs.c, na.rm = T)
+
+```
+
+# 1) check for correlations between amyg and hipp and cort
+for each TP - confirming cross-sectional relationships from SEM model. 
+```{r}
+# correlated very highly.
+amyg_hipp_cor1 <- cor.test(df_wide$Amyg_wave1, df_wide$Hipp_wave1)
+amyg_hipp_cor1
+save(amyg_hipp_cor1, file = "model_output/amyg_hipp_correlation_wave1.Rdata")
+amyg_hipp_cor2 <- cor.test(df_wide$Amyg_wave2, df_wide$Hipp_wave2)
+amyg_hipp_cor2
+save(amyg_hipp_cor2, file = "model_output/amyg_hipp_correlation_wave2.Rdata")
+
+# not correlated
+amyg_cort_cor1 <- cor.test(df_wide$Amyg_wave1, df_wide$waking_wave1)
+amyg_cort_cor1
+save(amyg_cort_cor1, file = "model_output/amyg_waking_correlation_wave1.Rdata")
+amyg_cort_cor2 <- cor.test(df_wide$Amyg_wave2, df_wide$waking_wave2)
+amyg_cort_cor2 
+save(amyg_cort_cor2, file = "model_output/amyg_waking_correlation_wave2.Rdata")
+
+# trend correlated
+hipp_cort_cor1 <- cor.test(df_wide$Hipp_wave1, df_wide$waking_wave1)
+hipp_cort_cor1
+save(hipp_cort_cor1, file = "model_output/hipp_waking_correlation_wave1.Rdata")
+# not corelated 
+hipp_cort_cor2 <- cor.test(df_wide$Hipp_wave2, df_wide$waking_wave2)
+hipp_cort_cor2
+save(hipp_cort_cor2, file = "model_output/hipp_waking_correlation_wave2.Rdata")
+
+```
+
+
+# 2) cross-lagged SEM Cort & Hipp 
+## basic model with cross-lag paths 
+
+note on standardized coefficients
+Two extra columns of standardized parameter values are printed. In the first column (labeled Std.lv), only the latent variables are standardized. In the second column (labeled Std.all), both latent and observed variables are standardized. The latter is often called the 'completely standardized solution'.
+```{r }
+
+model= 
+'
+#Regression paths cross-lagged
+Hipp_wave2_rs.c ~  Hipp_wave1_rs.c + waking_wave1.c + Age_wave2.c +  IDENT_SUBTYPE + sex.c + ICV_wave2_rs.c + scanner_wave2
+waking_wave2.c ~ Hipp_wave1_rs.c + waking_wave1.c + Age_wave2.c + IDENT_SUBTYPE + sex.c 
+
+# Regression paths at T1 
+Hipp_wave1_rs.c ~ Age_wave1.c + IDENT_SUBTYPE  +  sex.c + ICV_wave1_rs.c 
+waking_wave1.c ~ Age_wave1.c + IDENT_SUBTYPE +  sex.c
+
+# covariance
+waking_wave1.c ~~ Hipp_wave1_rs.c
+waking_wave2.c ~~ Hipp_wave2_rs.c
+
+# time 1 - time 2 things
+ICV_wave1_rs.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Age_wave2.c 
+
+# correlations at each time point 
+Age_wave1.c ~ ICV_wave1_rs.c 
+Age_wave2.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Hipp_wave1_rs.c 
+Age_wave2.c ~ Hipp_wave2_rs.c
+Age_wave1.c ~ waking_wave1.c
+Age_wave2.c ~ waking_wave2.c
+#sex.c	~	Hipp_wave1_rs.c		
+
+ICV_wave1_rs.c	~	Hipp_wave1_rs.c	
+ICV_wave2_rs.c	~	Hipp_wave2_rs.c	
+
+
+IDENT_SUBTYPE	~	Hipp_wave1_rs.c
+#IDENT_SUBTYPE ~ sex.c 
+IDENT_SUBTYPE ~ ICV_wave1_rs.c
+'
+
+hipp_mod1 <- sem(model, data=df_wide, fixed.x=F, missing='fiml')
+
+fit_measures <- data.frame(fitMeasures(hipp_mod1)) 
+names(fit_measures) <- "value"
+fit_measures$metric <- rownames(fit_measures) 
+fit_measures$model <- "hipp_mod1"
+
+hipp_mod1_fit_measures <- fit_measures %>%
+  spread(metric, value)
+
+summary(hipp_mod1, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+# parameterEstimates(hipp_mod1) just useful for confidence intervals.
+
+```
+
+## testing model without hipp1 --> waking 2
+```{r }
+
+model= 
+'
+#Regression paths cross-lagged
+Hipp_wave2_rs.c ~  Hipp_wave1_rs.c + waking_wave1.c + Age_wave2.c +  IDENT_SUBTYPE + sex.c + ICV_wave2_rs.c + scanner_wave2
+waking_wave2.c ~  waking_wave1.c + Age_wave2.c + IDENT_SUBTYPE + sex.c 
+
+# Regression paths at T1 
+Hipp_wave1_rs.c ~ Age_wave1.c + IDENT_SUBTYPE  +  sex.c + ICV_wave1_rs.c 
+waking_wave1.c ~ Age_wave1.c + IDENT_SUBTYPE +  sex.c 
+
+# covariance
+waking_wave1.c ~~ Hipp_wave1_rs.c
+waking_wave2.c ~~ Hipp_wave2_rs.c
+
+# time 1 - time 2 things
+ICV_wave1_rs.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Age_wave2.c 
+
+# correlations at each time point 
+Age_wave1.c ~ ICV_wave1_rs.c 
+Age_wave2.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Hipp_wave1_rs.c 
+Age_wave2.c ~ Hipp_wave2_rs.c
+Age_wave1.c ~ waking_wave1.c
+Age_wave2.c ~ waking_wave2.c
+#sex.c	~	Hipp_wave1_rs.c		
+
+ICV_wave1_rs.c	~	Hipp_wave1_rs.c	
+ICV_wave2_rs.c	~	Hipp_wave2_rs.c		
+
+IDENT_SUBTYPE	~	Hipp_wave1_rs.c
+#IDENT_SUBTYPE ~ sex.c 
+IDENT_SUBTYPE ~ ICV_wave1_rs.c
+'
+
+hipp_mod2 <- sem(model, data=df_wide, fixed.x=F, missing='fiml')
+
+fit_measures <- data.frame(fitMeasures(hipp_mod2)) 
+names(fit_measures) <- "value"
+fit_measures$metric <- rownames(fit_measures) 
+fit_measures$model <- "hipp_mod2"
+
+hipp_mod2_fit_measures <- fit_measures %>%
+  spread(metric, value)
+```
+
+## chisquare difference test
+adding hipp wave1 --> cort wave 2 significantly improves model fit
+
+```{r}
+hipp_mod1_fit_measures$chisq # model with hipp has better (lower) chi-square
+hipp_mod2_fit_measures$chisq # model without hipp has higher (worse) chi-square 
+
+# is this difference significant?
+diff_chi_sq <- abs(hipp_mod2_fit_measures$chisq - hipp_mod1_fit_measures$chisq)
+diff_df <-  abs(hipp_mod2_fit_measures$df - hipp_mod1_fit_measures$df)
+
+# yes!
+chi_square_hipp_result <- chi_square_test(diff_chi_sq, diff_df)
+chi_square_hipp_result
+save(chi_square_hipp_result, file = "model_output/hipp_cross_lag_chi_sq_test.Rdata")
+
+```
+
+
+# 3) cross-lagged SEM Cort & Amyg 
+## basic model
+```{r }
+df_wide <- df_wide %>%
+  mutate(scanner_wave2.c = scanner_wave2 - mean(scanner_wave2, na.rm = T),
+         GROUP.n =ifelse(df_wide$GROUP == "PI", 1, 0), 
+         GROUP.c = GROUP.n - mean(GROUP.n))
+model= 
+'
+#Regression paths cross-lagged
+Amyg_wave2_rs.c ~  Amyg_wave1_rs.c + waking_wave1.c + Age_wave2.c +  IDENT_SUBTYPE + sex.c + ICV_wave2_rs.c + scanner_wave2
+waking_wave2.c ~ Amyg_wave1_rs.c + waking_wave1.c + Age_wave2.c + IDENT_SUBTYPE + sex.c 
+
+# Regression paths at T1 
+Amyg_wave1_rs.c ~ Age_wave1.c + IDENT_SUBTYPE  +  sex.c + ICV_wave1_rs.c 
+waking_wave1.c ~ Age_wave1.c + IDENT_SUBTYPE +  sex.c 
+
+# covariance
+waking_wave1.c ~~ Amyg_wave1_rs.c
+waking_wave2.c ~~ Amyg_wave2_rs.c
+
+# time 1 - time 2 things
+ICV_wave1_rs.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Age_wave2.c 
+
+# correlations at each time point 
+Age_wave1.c ~ ICV_wave1_rs.c 
+Age_wave2.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Amyg_wave1_rs.c 
+Age_wave2.c ~ Amyg_wave2_rs.c
+Age_wave1.c ~ waking_wave1.c
+Age_wave2.c ~ waking_wave2.c
+#sex.c	~	Amyg_wave1_rs.c		
+
+ICV_wave1_rs.c	~	Amyg_wave1_rs.c	
+ICV_wave2_rs.c	~	Amyg_wave2_rs.c		
+
+IDENT_SUBTYPE	~	Amyg_wave1_rs.c
+#IDENT_SUBTYPE ~ sex.c 
+IDENT_SUBTYPE ~ ICV_wave1_rs.c
+'
+
+amyg_mod1 <- sem(model, data=df_wide, fixed.x=F, missing='fiml')
+
+fit_measures <- data.frame(fitMeasures(amyg_mod1)) 
+names(fit_measures) <- "value"
+fit_measures$metric <- rownames(fit_measures) 
+fit_measures$model <- "amyg_mod1"
+
+amyg_mod1_fit_measures <- fit_measures %>%
+  spread(metric, value)
+
+summary(amyg_mod1, fit.measures=TRUE, standardized=TRUE, rsquare=TRUE)
+#standardizedSolution(amyg_mod1)
+#parameterEstimates(amyg_mod1) #just useful for confidence intervals.
+```
+
+## testing model without amyg1 --> cort 2
+```{r }
+
+model= 
+'
+#Regression paths cross-lagged
+Amyg_wave2_rs.c ~  Amyg_wave1_rs.c + waking_wave1.c + Age_wave2.c +  IDENT_SUBTYPE + sex.c + ICV_wave2_rs.c + scanner_wave2 
+waking_wave2.c ~  waking_wave1.c + Age_wave2.c + IDENT_SUBTYPE + sex.c 
+
+# Regression paths at T1 
+Amyg_wave1_rs.c ~ Age_wave1.c + IDENT_SUBTYPE  +  sex.c + ICV_wave1_rs.c 
+waking_wave1.c ~ Age_wave1.c + IDENT_SUBTYPE +  sex.c 
+
+# covariance
+waking_wave1.c ~~ Amyg_wave1_rs.c
+waking_wave2.c ~~ Amyg_wave2_rs.c
+
+# time 1 - time 2 things
+ICV_wave1_rs.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Age_wave2.c 
+
+# correlations at each time point 
+Age_wave1.c ~ ICV_wave1_rs.c 
+Age_wave2.c ~ ICV_wave2_rs.c 
+Age_wave1.c ~ Amyg_wave1_rs.c 
+Age_wave2.c ~ Amyg_wave2_rs.c
+Age_wave1.c ~ waking_wave1.c
+Age_wave2.c ~ waking_wave2.c
+#sex.c	~	Amyg_wave1_rs.c		
+
+ICV_wave1_rs.c	~	Amyg_wave1_rs.c	
+ICV_wave2_rs.c	~	Amyg_wave2_rs.c		
+
+IDENT_SUBTYPE	~	Amyg_wave1_rs.c
+#IDENT_SUBTYPE ~ sex.c 
+IDENT_SUBTYPE ~ ICV_wave1_rs.c
+'
+
+amyg_mod2 <- sem(model, data=df_wide, fixed.x=F, missing='fiml')
+
+fit_measures <- data.frame(fitMeasures(amyg_mod2)) 
+names(fit_measures) <- "value"
+fit_measures$metric <- rownames(fit_measures) 
+fit_measures$model <- "amyg_mod2"
+
+amyg_mod2_fit_measures <- fit_measures %>%
+  spread(metric, value)
+```
+
+
+## Chi-square test of model fit 
+including amyg wave1 to predict waking wave 2 significantly improves model fit!
+```{r}
+amyg_mod1_fit_measures$chisq # model with amyg has better (lower) chi-square
+amyg_mod2_fit_measures$chisq # model without amyg has higher (worse) chi-square 
+
+# is this difference significant?
+diff_chi_sq <- abs(amyg_mod2_fit_measures$chisq - amyg_mod1_fit_measures$chisq)
+diff_df <-  abs(amyg_mod2_fit_measures$df - amyg_mod1_fit_measures$df)
+
+
+# yes!
+chi_square_amyg_result <- chi_square_test(diff_chi_sq, diff_df)
+chi_square_amyg_result
+save(chi_square_amyg_result, file = "model_output/amyg_cross_lag_chi_sq_test.Rdata")
+
+```
+
+
+
+# save final models 
+
+```{r}
+save(amyg_mod1, file = "model_output/amyg_waking_cross_lagged_model_main_effects.Rdata")
+
+save(hipp_mod1, file = "model_output/hipp_waking_cross_lagged_model_main_effects.Rdata")
+
+```
+
+

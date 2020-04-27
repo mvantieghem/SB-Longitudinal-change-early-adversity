@@ -1,0 +1,236 @@
+---
+title: "Cleaning data for symptom analysis"
+author: "Michelle VanTieghem"
+date: "July 25, 2018"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# README
+prep data for analysis with RCADS symptoms scores
+
+
+```{r, include = F, echo = F, message = F, warning = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+# 1) prep data 
+## load data 
+```{r}
+
+load("../../../data/3_ALL_long_cort_symptoms_brain_structure_all_ages_2019-11-12.Rdata")
+```
+
+## filter out non-PI or comps 
+```{r}
+# double checking only comps & PIS 
+monster_SB <- subset(monster_SB, IDENT_SUBTYPE == 0 | IDENT_SUBTYPE == 1)
+nrow(monster_SB) # 452 
+
+# renaming group variable
+monster_SB$GROUP <- as.factor(ifelse(monster_SB$IDENT_SUBTYPE == 0, "COMP", "PI"))
+summary(monster_SB$GROUP)
+
+# making group centered variable.
+monster_SB$GROUP.c <- ifelse(monster_SB$IDENT_SUBTYPE == 0, -.5, .5)
+summary(monster_SB$GROUP.c)
+
+```
+
+
+## set sample with no missing cort or brain or symptoms
+this data will be used for symptom analysis. 
+```{r}
+monster_SB_cleaned <- monster_SB %>%
+  filter(!is.na(Hipp_ave) & !is.na(waking) & !is.na(RCADS_int_long))
+
+nrow(monster_SB_cleaned) 
+```
+
+
+
+# 2) check for outliers by TP and group. 
+note: outliers by wave were already excluded, but this is a subsample... 
+we are labeling these outliers as "outliers_mixed_effects_sample"
+```{r, echo = F}
+monster_SB_cleaned <- monster_SB_cleaned[
+  with(monster_SB_cleaned, order(GROUP, index_wave)),]
+
+# select variables you want outliers for
+var_list <- monster_SB_cleaned %>% 
+  dplyr::select(Amyg_ave, Hipp_ave, waking, slope, RCADS_int_long, ICV)
+var_list <- names(var_list)
+
+# make an empty dataframe to store new stuff into 
+outlier_list <- NA
+# run through loop of each variable 
+for (var in var_list){
+    print (var)
+  #var <- "slope"
+  # use dplyr magic to get all of the info you need.
+  outlier_groups <- monster_SB_cleaned %>% 
+    # group by GROUP and TIMEPOINT.
+      dplyr::select (var, GROUP, index_wave) %>% 
+         group_by(GROUP, index_wave) %>% # sort data by group and tp 
+         summarize_all(funs(mean(., na.rm = T), sd(., na.rm = T)))         
+    # get the means, SD, upper and lower limit (3 SD above or below mean) for 
+  outlier_groups$upper <- outlier_groups$mean + 3*outlier_groups$sd 
+  outlier_groups$lower <-  outlier_groups$mean - 3*outlier_groups$sd 
+   
+   # restart these here, because they will generated anew for each variable.
+
+    outlier_list <- data.frame()
+# for each grouping in outlier_groups, find outliers and mark them. 
+for (i in 1:nrow(outlier_groups)){
+  print(i)
+  # which group is this? PI or comp
+  group <- outlier_groups$GROUP[i]
+  tp <- outlier_groups$index_wave[i]
+  # set the max and minimum values of cortisol that we will use as outlier threshold
+  lower_limits <- outlier_groups$lower[i]
+  upper_limits <- outlier_groups$upper[i]
+  # get all of the original data by group & wave
+  data_chunk <- subset(monster_SB_cleaned,  GROUP== group & index_wave == tp)
+ # make sure you're only calculating outliers for the correct variable 
+  variable <- data_chunk %>% dplyr::select(var)
+   # mark the outliers as 1
+  mark_outliers <- data.frame(ifelse(variable >= upper_limits
+                          | variable<= lower_limits, 1, 0))
+   # make sure this name matches the variable name (e.g. L hipp)
+  names(mark_outliers) <- paste0(var, "_outliers_mixed_effects_sample")
+  # save the outlier 1s and 0s into a new column 
+  outlier_list <- rbind(outlier_list, mark_outliers)
+  # make sure the column name matches the variable name (e.g. L hipp)
+  names(outlier_list) <- paste0(var, "_outliers_mixed_effects_sample")
+} 
+  print ("loop break")
+  # add the new column of outliers for each variable (e.g. L hipp) to the orig dataframe. 
+   monster_SB_cleaned <- cbind(monster_SB_cleaned, outlier_list) 
+   
+}
+```
+
+
+## get info on these outliers 
+```{r}
+# get info on who they are and what wave they are 
+mixed_effects_outlier_table <- monster_SB_cleaned %>% 
+  group_by(IDENT_SUBTYPE, index_wave) %>%
+ dplyr::summarize(N_exclude_amyg = sum(Amyg_ave_outliers_mixed_effects_sample, na.rm = T), 
+            N_exclude_hipp = sum(Hipp_ave_outliers_mixed_effects_sample, na.rm  = T), 
+            N_exclude_slope = sum(slope_outliers_mixed_effects_sample, na.rm = T), 
+            N_exclude_waking = sum(waking_outliers_mixed_effects_sample, na.rm = T), 
+            N_exclude_RCADS_int = sum(RCADS_int_long_outliers_mixed_effects_sample, na.rm = T),
+            N_exclude_ICV = sum(ICV_outliers_mixed_effects_sample, na.rm=T))
+mixed_effects_outlier_table
+save(mixed_effects_outlier_table, file = "tables/outlier_table_mixed_effects_cort_brain_symptoms_ages4to19.Rdata")
+```
+
+## mark these outliers as NAs.
+```{r}
+monster_SB_cleaned$Amyg_ave_cleaned <- monster_SB_cleaned$Amyg_ave
+monster_SB_cleaned$Amyg_ave_cleaned[monster_SB_cleaned$Amyg_ave_outliers_mixed_effects_sample == 1] <- NA
+
+monster_SB_cleaned$Hipp_ave_cleaned <- monster_SB_cleaned$Hipp_ave
+monster_SB_cleaned$Hipp_ave_cleaned[monster_SB_cleaned$Hipp_ave_outliers_mixed_effects_sample == 1] <- NA
+
+monster_SB_cleaned$waking_cleaned <- monster_SB_cleaned$waking
+monster_SB_cleaned$waking_cleaned[monster_SB_cleaned$waking_outliers_mixed_effects_sample == 1] <- NA
+
+
+monster_SB_cleaned$slope_cleaned <- monster_SB_cleaned$slope
+monster_SB_cleaned$slope_cleaned[monster_SB_cleaned$slope_outliers_mixed_effects_sample == 1] <- NA
+
+monster_SB_cleaned$RCADS_int_long_cleaned <- monster_SB_cleaned$RCADS_int_long
+monster_SB_cleaned$RCADS_int_long_cleaned[monster_SB_cleaned$RCADS_int_long_outliers_mixed_effects_sample == 1] <- NA
+
+
+monster_SB_cleaned$ICV_cleaned <- monster_SB_cleaned$ICV
+monster_SB_cleaned$ICV_cleaned[monster_SB_cleaned$ICV_outliers_mixed_effects_sample == 1] <- NA
+
+```
+
+
+# 3) get cort/brain/symptoms sample demographics 
+
+set age for this analysis: to RCADS outcome
+may be slight variations in RCADS, cort and brain ages.
+```{r}
+# for this analysis, outcome is RCADS. set ages to be = when RCADS collected.
+monster_SB_cleaned <- monster_SB_cleaned %>%
+  mutate(age = ifelse(!is.na(RCADS_age), RCADS_age/12, 
+          ifelse( !is.na(corrected_cort_age_yrs), corrected_cort_age_yrs, 
+                      ifelse(!is.na(brain_age_yrs), brain_age_yrs, NA ))), 
+         Age.c = age - mean(age), 
+         scanner_confound = ifelse(index_wave == 3, 1, 0), 
+         GROUP.c = ifelse(GROUP == "PI", 0.5, -0.5))
+
+```
+
+use updated age for your demographics table. 
+```{r}
+cort_hipp_dem_table_by_wave <- monster_SB_cleaned %>%
+  group_by(GROUP, index_wave) %>%
+  dplyr::summarize(n= n() , 
+            mean_age = mean(age, na.rm = T), 
+            sd_age = sd(age, na.rm = T),
+            min_age = min(age, na.rm = T),
+            max_age = max(age, na.rm = T),
+            N_female = sum(DEM_3_GENDER_CHILD.x, na.rm = T),
+            prop_female = mean(DEM_3_GENDER_CHILD.x, na.rm = T))
+
+cort_hipp_dem_table_by_wave
+
+save(cort_hipp_dem_table_by_wave, file = "tables/Demo_cort_hipp_symptoms_mixed_effects_sample_by_wave_ages4to19.Rdata")
+
+```
+
+## get the total N per group.. 
+```{r}
+N_total_symptoms <- length(unique(monster_SB_cleaned$IDENT_SUBID))
+N_PI_symptoms <- length(unique(monster_SB_cleaned$IDENT_SUBID[monster_SB_cleaned$GROUP == "PI"]))
+N_COMP_symptoms <- length(unique(monster_SB_cleaned$IDENT_SUBID[monster_SB_cleaned$GROUP == "COMP"]))
+
+
+
+cort_hipp_dem_table <- data.frame(group = c("all", "PI", "COMP"), n = c(N_total_symptoms, N_PI_symptoms, N_COMP_symptoms))
+cort_hipp_dem_table 
+
+save(cort_hipp_dem_table, file = "tables/Demo_cort_hipp_symptoms_mixed_effects_sample_overall_ages4to19.Rdata")
+
+
+```
+
+
+# 4) mean-centering for analysis 
+```{r}
+# center necessary variables.
+monster_SB_cleaned$GROUP.c <- monster_SB_cleaned$IDENT_SUBTYPE - mean(monster_SB_cleaned$IDENT_SUBTYPE)
+monster_SB_cleaned$sex.c <- monster_SB_cleaned$sex - mean(monster_SB_cleaned$sex, na.rm = T)
+monster_SB_cleaned$scanner_confound <- with(monster_SB_cleaned, ifelse(index_wave == 3, 1, 0))
+
+# rescale variables 
+monster_SB_cleaned$Amyg_ave_cleaned_rs <- monster_SB_cleaned$Amyg_ave_cleaned/100
+monster_SB_cleaned$Hipp_ave_cleaned_rs <- monster_SB_cleaned$Hipp_ave_cleaned/100
+#**IMPT: ICV SCALED EVEN MORE - because tiny coefficients < 0.001 that are significant effects.
+monster_SB_cleaned$ICV_cleaned_rs <- monster_SB_cleaned$ICV_cleaned/ 100000
+
+# then center the re-scaled variables 
+monster_SB_cleaned$Amyg_ave_cleaned_rs.c <- monster_SB_cleaned$Amyg_ave_cleaned_rs - mean(monster_SB_cleaned$Amyg_ave_cleaned_rs, na.rm = T)
+monster_SB_cleaned$Hipp_ave_cleaned_rs.c <- monster_SB_cleaned$Hipp_ave_cleaned_rs - mean(monster_SB_cleaned$Hipp_ave_cleaned_rs, na.rm = T)
+monster_SB_cleaned$ICV_cleaned_rs.c <- monster_SB_cleaned$ICV_cleaned_rs - mean(monster_SB_cleaned$ICV_cleaned_rs, na.rm = T)
+monster_SB_cleaned$waking_cleaned.c <- monster_SB_cleaned$waking_cleaned - mean(monster_SB_cleaned$waking_cleaned, na.rm = T)
+```
+
+SAVE THIS DATA
+```{r}
+save(monster_SB_cleaned,file= "../../../data/4_all_data_mixed_effects/CLEANED_ALL_long_cort_symptoms_brain_structure_all_ages_2019-11-12.Rdata")
+
+```

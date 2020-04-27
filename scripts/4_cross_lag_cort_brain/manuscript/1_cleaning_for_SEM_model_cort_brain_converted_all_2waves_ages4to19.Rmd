@@ -1,0 +1,519 @@
+---
+title: "Cleaning data for cross-lagged SEM models for cort-brain with 2 waves"
+author: "Michelle.VanTieghem"
+date: "Oct 1, 2018"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# Readme 
+This is all cort-brain-symptom combined data \
+Includes all subjects who have either cort, brain, or both at a given time point\
+data in long format, one row per wave per subj. \
+
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+
+# 1) prep data 
+
+## load data
+```{r}
+load("../../../data/3_ALL_long_cort_symptoms_brain_structure_all_ages_2019-11-12.Rdata")
+```
+
+## check N and groups 
+```{r}
+monster_SB <- monster_SB %>%
+  filter( IDENT_SUBTYPE == 0 | IDENT_SUBTYPE == 1) %>%
+  mutate(GROUP =  as.factor(ifelse(IDENT_SUBTYPE == 0, "COMP", "PI")))
+summary(monster_SB$GROUP)
+
+sum(is.na(monster_SB$batch))
+sum(is.na(monster_SB$waking))
+```
+
+## add scanner confound to this dataset.
+```{r}
+monster_SB$scanner_confound <- ifelse(monster_SB$index_wave == 3, 1, 0)
+
+```
+
+## mark the rows that do have a cortisol or brain observation.
+```{r}
+monster_SB <- monster_SB %>%
+  mutate(has_brain = ifelse(!is.na(Left.Amygdala), 1, 0), 
+         has_cort = ifelse(!is.na(waking), 1, 0))
+summary(as.factor(monster_SB$has_brain))
+
+summary(as.factor(monster_SB$has_cort))
+summary(as.factor(monster_SB$batch))
+
+```
+
+## Sanity check that we have all the data
+```{r}
+# check that this data only includes rows with at least cort OR brain observation
+monster_SB_cleaned <- monster_SB %>%
+  filter(has_cort == 1 | has_brain == 1) %>%
+  # make a generic age variable
+ #_#_#_##_#_
+  # mutate(general_age = ifelse(!is.na(brain_age_yrs), brain_age_yrs, corrected_cort_age_yrs))
+  mutate(general_age = age)
+
+#  no rows of data were excluded! 
+identical(nrow(monster_SB_cleaned), nrow(monster_SB))
+length(unique(monster_SB_cleaned$IDENT_SUBID))
+
+```
+
+# 2) start subsetting subjects based on waves of data
+## COB: CORT OR BRAIN
+
+### calculate the MAX N for who has COB
+```{r}
+monster_SB_cleaned$index_wave <- as.numeric(as.character(monster_SB_cleaned$index_wave))
+
+# here keep waves with EITHER cort or brain (NOT both)  
+wave_assess1 <-  monster_SB_cleaned %>%
+  filter((has_brain != 1 & has_cort == 1) | (has_brain ==1 & has_cort != 1)) %>%
+  group_by(IDENT_SUBID) %>% 
+  dplyr::summarize(min_wave = min(index_wave), 
+            max_wave = max(index_wave))
+
+```
+
+### visualize the waves - for COB
+```{r}
+
+ggplot(wave_assess1, aes(x = min_wave, y = max_wave)) + 
+  geom_jitter( width = 0.1)  + theme_classic() 
+
+```
+
+### calculate N for COB at 2 waves or 1 wave
+```{r}
+nrow(wave_assess1)
+
+one_tp <- with(wave_assess1, ifelse(min_wave == max_wave, 1, NA))
+sum(one_tp, na.rm = T)
+
+two_tp <- with(wave_assess1, ifelse(min_wave < max_wave, 1, NA))
+sum(two_tp, na.rm = T)
+
+```
+
+## CAB: Cort and brain 
+### calculate the max/min wave for rows with  CAB
+```{r}
+# here only keep waves who DO have both cort & brain 
+wave_assess2 <-  monster_SB_cleaned %>%
+  filter(has_cort == 1 & has_brain == 1) %>%
+  group_by(IDENT_SUBID) %>% 
+  # for that subject, figure out which waves they have cort & brain
+  dplyr::summarize(min_wave = min(index_wave), 
+            max_wave = max(index_wave))
+
+```
+
+### visualize the waves for CAB
+```{r}
+ggplot(wave_assess2, aes(x = min_wave, y = max_wave)) + 
+  geom_jitter( width = 0.1)  + theme_classic() 
+
+```
+
+### calculate N for CAB at 2 waves or 1 wave
+```{r}
+# 136 subjects have brain and behavior data collected at the same wave. 
+nrow(wave_assess2)
+
+one_tp <- with(wave_assess2, ifelse(min_wave == max_wave, 1, NA))
+sum(one_tp, na.rm = T)
+
+two_tp <- with(wave_assess2, ifelse(min_wave < max_wave, 1, NA))
+sum(two_tp, na.rm = T)
+
+```
+
+## Parsing waves to keep in database
+keep all subjects with 2 tp of either COB or CAB \
+```{r}
+
+wave_assess3 <- merge(wave_assess1, wave_assess2, by = "IDENT_SUBID", all= T)
+names(wave_assess3)
+
+# where CAB means CORT + BRAIN 
+# and incomplete means COB 
+names(wave_assess3) <- c( "IDENT_SUBID", "min_wave_for_COB", "max_wave_for_COB", "min_wave_for_CAB", "max_wave_for_CAB")
+
+```
+
+### continuing to check waves to keep in database 
+figure out if subjects have one or 2 waves of data to use
+```{r}
+
+wave_assess3 <- wave_assess3 %>%
+  # mark subjects with 1 or 2 waves of cort& brain
+  mutate(one_tp_complete = ifelse(min_wave_for_CAB == max_wave_for_CAB, 1, NA),
+         two_tp_complete = ifelse(min_wave_for_CAB < max_wave_for_CAB, 1, NA),
+         one_tp_incomplete = ifelse(min_wave_for_COB == max_wave_for_COB & 
+                                      is.na(one_tp_complete), 1, NA),
+         two_tp_incomplete = ifelse(min_wave_for_COB < max_wave_for_COB &
+                                      is.na(two_tp_complete), 1, NA))
+
+```
+
+
+### get max waves to keep for subjects with 2 tp 
+if subj has 3 waves, prioritize the 2 waves that consist of CAB or COB. \
+since we can't have a model with 3 tp, we will keep their 2 waves pairs with COB / CAB
+```{r}
+wave_assess3 <- wave_assess3 %>%
+  # only for subjects with 2 time points, let's get max wave.
+  mutate(keep_max_wave = ifelse(is.na(two_tp_complete) & two_tp_incomplete == 1,
+max_wave_for_COB, ifelse(two_tp_complete == 1, max_wave_for_CAB, NA)),
+#  for subjects with 2 or 1 time point, let's get min wave.
+         keep_min_wave = ifelse(one_tp_complete == 1 & is.na(two_tp_incomplete) &
+        is.na(one_tp_incomplete) &  is.na(two_tp_complete), min_wave_for_CAB, 
+         ifelse(one_tp_incomplete == 1 & is.na(two_tp_incomplete) & is.na(one_tp_complete) & 
+         is.na(two_tp_complete), min_wave_for_COB,   
+         ifelse(two_tp_incomplete == 1 & is.na(two_tp_complete), min_wave_for_COB, 
+       ifelse(two_tp_complete == 1 & is.na(two_tp_incomplete), min_wave_for_CAB, NA)))))
+       
+# check that function worked.
+sum(is.na(wave_assess3$keep_min_wave)) # should be zero.
+summary(wave_assess3$keep_max_wave)
+```
+
+### visualize final waves used for this analysis
+this plot reflects the distance between min and max waves 
+```{r}
+
+# if value = 1, subject has data for waves 2 yrs apart
+# if value = 2, subject has data for waves 4 yrs apart 
+wave_assess3$wave_diff <-  wave_assess3$keep_max_wave - wave_assess3$keep_min_wave
+hist(wave_assess3$wave_diff)
+```
+
+## add wave info back into monster df and reorganize 
+```{r}
+
+SB_2wave <- monster_SB_cleaned %>% 
+  left_join(., wave_assess3, by = "IDENT_SUBID") %>%
+# only keep rows of data that are included in min or max waves for analysis.
+  filter(keep_max_wave== index_wave | keep_min_wave == index_wave)
+nrow(SB_2wave)
+
+# make new waves for the 2 wave cross-lag analysis 
+SB_2wave$NEW_WAVE[SB_2wave$keep_min_wave == SB_2wave$index_wave] <- 1
+SB_2wave$NEW_WAVE[SB_2wave$keep_max_wave == SB_2wave$index_wave] <- 2
+# sanity check
+sum(is.na(SB_2wave$NEW_WAVE))
+```
+
+
+
+# 3) check for outliers by TP and group. 
+note: outliers by wave were already excluded, but this is a subsample...
+so just re-checking outliers! 
+```{r, results = "hide", warning = F, message = F}
+SB_2wave <- SB_2wave[
+  with(SB_2wave, order(GROUP, NEW_WAVE)),
+]
+
+# select variables you want outliers for
+var_list <- SB_2wave %>% dplyr::select(Amyg_ave, Hipp_ave, waking, slope, ICV)
+var_list <- names(var_list)
+
+# make an empty dataframe to store new stuff into 
+outlier_list <- NA
+# run through loop of each variable 
+for (var in var_list){
+    print (var)
+  #var <- "slope"
+  # use dplyr magic to get all of the info you need.
+  outlier_groups <- SB_2wave %>% 
+    # group by GROUP and TIMEPOINT.
+      dplyr::select (var, GROUP, NEW_WAVE) %>% 
+         group_by(GROUP, NEW_WAVE) %>% # sort data by group and tp 
+         dplyr::summarize_all(funs(mean(., na.rm = T), sd(., na.rm = T)))         
+    # get the means, SD, upper and lower limit (3 SD above or below mean) for 
+  outlier_groups$upper <- outlier_groups$mean + 3*outlier_groups$sd 
+  outlier_groups$lower <-  outlier_groups$mean - 3*outlier_groups$sd 
+   
+   # restart these here, because they will generated anew for each variable.
+
+    outlier_list <- data.frame()
+# for each grouping in outlier_groups, find outliers and mark them. 
+for (i in 1:nrow(outlier_groups)){
+  print(i)
+  # which group is this? PI or comp
+  group <- outlier_groups$GROUP[i]
+  tp <- outlier_groups$NEW_WAVE[i]
+  # set the max and minimum values of cortisol that we will use as outlier threshold
+  lower_limits <- outlier_groups$lower[i]
+  upper_limits <- outlier_groups$upper[i]
+  # get all of the original data by group & wave
+  data_chunk <- subset(SB_2wave,  GROUP== group & NEW_WAVE == tp)
+ # make sure you're only calculating outliers for the correct variable 
+  variable <- data_chunk %>% dplyr::select(var)
+   # mark the outliers as 1
+  mark_outliers <- data.frame(ifelse(variable >= upper_limits
+                          | variable<= lower_limits, 1, 0))
+   # make sure this name matches the variable name (e.g. L hipp)
+  names(mark_outliers) <- paste0(var, "_outliers_cross_lag_sample")
+  # save the outlier 1s and 0s into a new column 
+  outlier_list <- rbind(outlier_list, mark_outliers)
+  # make sure the column name matches the variable name (e.g. L hipp)
+  names(outlier_list) <- paste0(var, "_outliers_cross_lag_sample")
+} 
+  print ("loop break")
+  # add the new column of outliers for each variable (e.g. L hipp) to the orig dataframe. 
+   SB_2wave <- cbind(SB_2wave, outlier_list) 
+   
+}
+```
+
+
+## get info on these outliers 
+```{r}
+length(unique(SB_2wave$IDENT_SUBID))
+# get info on who they are and what wave they are 
+cross_lag_outlier_table <- SB_2wave %>% 
+  group_by(IDENT_SUBTYPE, NEW_WAVE) %>%
+  dplyr::summarize(n = n() ,
+            N_exclude_amyg = sum(Amyg_ave_outliers_cross_lag_sample, na.rm = T), 
+            N_exclude_hipp = sum(Hipp_ave_outliers_cross_lag_sample, na.rm  = T), 
+            N_exclude_slope = sum(slope_outliers_cross_lag_sample, na.rm = T), 
+            N_exclude_waking = sum(waking_outliers_cross_lag_sample, na.rm = T),
+            N_exclude_ICV = sum(ICV_outliers_cross_lag_sample, na.rm = T))
+cross_lag_outlier_table 
+save(cross_lag_outlier_table,file =  "tables/outlier_table_2wave_all_SEM_cort_brain_sample.Rdata")
+```
+
+## mark these outliers as NAs.
+```{r}
+SB_2wave$ICV_cleaned <- SB_2wave$ICV
+SB_2wave$ICV_cleaned[SB_2wave$ICV_outliers_cross_lag_sample == 1] <- NA
+
+SB_2wave$Amyg_ave_cleaned <- SB_2wave$Amyg_ave
+SB_2wave$Amyg_ave_cleaned[SB_2wave$Amyg_ave_outliers_cross_lag_sample == 1] <- NA
+
+SB_2wave$Hipp_ave_cleaned <- SB_2wave$Hipp_ave
+SB_2wave$Hipp_ave_cleaned[SB_2wave$Hipp_ave_outliers_cross_lag_sample == 1] <- NA
+
+SB_2wave$waking_cleaned <- SB_2wave$waking
+SB_2wave$waking_cleaned[SB_2wave$waking_outliers_cross_lag_sample == 1] <- NA
+
+SB_2wave$slope_cleaned <- SB_2wave$slope
+SB_2wave$slope_cleaned[SB_2wave$slope_outliers_cross_lag_sample == 1] <- NA
+
+
+SB_2wave$slope_cleaned <- SB_2wave$slope
+SB_2wave$slope_cleaned[SB_2wave$slope_outliers_cross_lag_sample == 1] <- NA
+```
+
+## sanity check, how many subjects with cort + brain (cleaned)
+```{r}
+SB_2wave$has_brain <- with(SB_2wave, ifelse(!is.na(Amyg_ave), 1, 0)) 
+summary(as.factor(SB_2wave$has_brain))
+
+SB_2wave$has_cort <- with(SB_2wave, ifelse(!is.na(waking), 1, 0)) 
+summary(as.factor(SB_2wave$has_cort))
+
+nrow(SB_2wave)
+length(unique(SB_2wave$IDENT_SUBID))
+
+```
+
+
+# 4) get  sample demographics
+```{r}
+
+dem_table <- SB_2wave %>%
+  group_by(GROUP, NEW_WAVE) %>%
+  dplyr::summarize(n= n() , 
+            mean_age = mean(corrected_cort_age_yrs, na.rm = T), 
+            min_age = min(corrected_cort_age_yrs, na.rm = T),
+            max_age = max(corrected_cort_age_yrs, na.rm = T),
+            prop_female = mean(DEM_3_GENDER_CHILD.y, na.rm = T), 
+            N_has_cort_data = sum(has_cort, na.rm = T),
+            N_has_brain_data = sum(has_brain, na.rm = T))
+
+dem_table
+save(dem_table, file= "tables/demographics_table_2wave_all_SEM_cort_brain_sample.Rdata")
+```
+
+# 5) convert this long df into wide df
+
+## make wide version of slope data 
+```{r}
+library(tidyverse)
+# just make a mini dataframe to calculate this.
+has_slope <- SB_2wave %>% 
+  dplyr::select(IDENT_SUBID, slope_cleaned, NEW_WAVE) %>% 
+ group_by(IDENT_SUBID, NEW_WAVE) %>%
+  dplyr::summarize(slope_cleaned = mean(slope_cleaned, na.rm = T))
+nrow(has_slope)  
+
+
+# make wide version of minidataframe
+has_slope2 <- spread(has_slope,NEW_WAVE,  slope_cleaned)
+# note: the NAs here are because that subject does not have that wave! 
+names(has_slope2) <- c("IDENT_SUBID", "slope_wave1", "slope_wave2")
+```
+
+## make wide version of waking data 
+```{r}
+library(tidyverse)
+# just make a mini dataframe to calculate this.
+has_waking <- SB_2wave %>% 
+  dplyr::select(IDENT_SUBID, waking_cleaned, NEW_WAVE) %>% 
+ group_by(IDENT_SUBID, NEW_WAVE) %>%
+  dplyr::summarize(waking_cleaned = mean(waking_cleaned, na.rm = T))
+nrow(has_waking)  
+
+# make wide version of minidataframe
+has_waking2 <- spread(has_waking,NEW_WAVE,  waking_cleaned)
+# note: the NAs here are because that subject does not have that wave! 
+names(has_waking2) <- c("IDENT_SUBID", "waking_wave1", "waking_wave2") 
+```
+
+## make wide version of hipp  
+```{r}
+has_hipp <- SB_2wave %>% 
+  dplyr::select(IDENT_SUBID, Hipp_ave_cleaned, NEW_WAVE) %>% 
+ group_by(IDENT_SUBID, NEW_WAVE) %>%
+  dplyr::summarize(Hipp_ave_cleaned = mean(Hipp_ave_cleaned, na.rm = T))
+nrow(has_hipp)  # 
+#head(has_hipp)
+# make wide version
+has_hipp2 <- spread(has_hipp, NEW_WAVE,  Hipp_ave_cleaned)
+names(has_hipp2) <- c("IDENT_SUBID", "Hipp_wave1", "Hipp_wave2")
+
+```
+
+## make wide version of amyg data 
+```{r}
+has_amyg <- SB_2wave %>% 
+  dplyr::select(IDENT_SUBID, Amyg_ave_cleaned, NEW_WAVE) %>% 
+ group_by(IDENT_SUBID, NEW_WAVE) %>%
+  dplyr::summarize(Amyg_ave_cleaned = mean(Amyg_ave_cleaned, na.rm = T))
+nrow(has_amyg)  # 
+#head(has_amyg)
+# make wide version
+has_amyg2 <- spread(has_amyg, NEW_WAVE,  Amyg_ave_cleaned)
+names(has_amyg2) <- c("IDENT_SUBID", "Amyg_wave1", "Amyg_wave2")
+
+```
+
+## make wide version of age
+```{r}
+has_age <- SB_2wave %>% 
+  dplyr::select(IDENT_SUBID, general_age, NEW_WAVE) %>% 
+ group_by(IDENT_SUBID, NEW_WAVE) %>%
+  dplyr::summarize(general_age = 
+              mean(general_age, na.rm = T))
+nrow(has_age)  # 
+#head(has_age)
+# make wide version
+has_age2 <- spread(has_age, NEW_WAVE,general_age)
+names(has_age2) <- c("IDENT_SUBID", "Age_wave1", "Age_wave2")
+
+```
+
+## make wide version of ICV
+```{r}
+has_ICV <- SB_2wave %>% 
+  dplyr::select(IDENT_SUBID, ICV_cleaned, NEW_WAVE) %>% 
+ group_by(IDENT_SUBID, NEW_WAVE) %>%
+  dplyr::summarize(ICV_cleaned = mean(ICV_cleaned, na.rm = T))
+nrow(has_ICV)  # 
+# make wide version
+has_ICV2 <- spread(has_ICV, NEW_WAVE, ICV_cleaned)
+names(has_ICV2) <- c("IDENT_SUBID", "ICV_wave1", "ICV_wave2")
+
+```
+
+
+## make wide version of scanner confound
+```{r}
+
+scanner_conf <- SB_2wave %>% 
+  dplyr::select(IDENT_SUBID, scanner_confound, NEW_WAVE) %>% 
+ group_by(IDENT_SUBID, NEW_WAVE) %>%
+  dplyr::summarize(scanner_confound = mean(scanner_confound, na.rm = T))
+
+# make wide version
+scanner_conf <- spread(scanner_conf, NEW_WAVE, scanner_confound)
+names(scanner_conf) <- c("IDENT_SUBID", "scanner_wave1", "scanner_wave2")
+
+```
+
+## make a wide version of batch (cortisol confound)
+```{r}
+batch_conf <- SB_2wave %>%
+  dplyr::select(IDENT_SUBID, batch, NEW_WAVE) %>% 
+ group_by(IDENT_SUBID, NEW_WAVE) %>%
+  dplyr::summarize(batch = mean(as.numeric(batch), na.rm = T))
+
+# make wide version
+batch_conf <- spread(batch_conf, NEW_WAVE,batch)
+names(batch_conf) <- c("IDENT_SUBID", "cort_batch_wave1", "cort_batch_wave2")
+  
+
+```
+
+
+## now merge these together (wide format)
+there is only one row per subjet here!! 
+```{r}
+df_wide <- has_slope2 %>%
+  left_join(., has_waking2, by = c("IDENT_SUBID"), all = T) %>%
+  left_join (., has_hipp2, by = c("IDENT_SUBID"), all = T) %>%
+  left_join(.,  has_amyg2, by = c("IDENT_SUBID"), all = T) %>%
+  left_join(., has_age2, by = c("IDENT_SUBID"), all = T) %>%
+  left_join(., has_ICV2, by = c("IDENT_SUBID"), all = T) %>%
+  left_join(., scanner_conf, by = c("IDENT_SUBID"), all = T) %>%
+  left_join(., batch_conf, by = "IDENT_SUBID", all = T)
+nrow(df_wide) # 1 row per subject! 
+length(unique(df_wide$IDENT_SUBID)) # sanity check
+
+
+sum(is.na(df_wide$waking_wave1))
+sum(is.na(df_wide$cort_batch_wave1))
+```
+
+
+## add in demographic info (not longitudinal)
+```{r}
+sub_info <- SB_2wave %>% 
+  dplyr::select(IDENT_SUBID, IDENT_SUBTYPE, DEM_3_GENDER_CHILD.y) %>%
+  group_by(IDENT_SUBID) %>%
+  dplyr::summarize(IDENT_SUBTYPE = mean(IDENT_SUBTYPE, na.rm = T), 
+            sex = mean(DEM_3_GENDER_CHILD.y, na.rm = T))
+
+# add subject ids and GROUP. 
+df_wide <- left_join(sub_info, df_wide, by = "IDENT_SUBID", all = T )
+
+```
+
+
+ save the data! 
+```{r}
+
+save(df_wide, file="../../../data/5_SEM_cross_lag_data/cleaned_all_2wave_cort_brain_wide_format_ages4to19.Rdata")
+```
+
+
+
