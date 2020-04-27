@@ -1,0 +1,668 @@
+---
+title: "Supplemental analyses for hippocampus volume"
+author: "Michelle.VanTieghem"
+date: "May 12, 2019"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+
+# README:
+Supplemental analysis for right / left hemispheres, age of adoption, PDS and testos
+
+
+```{r, include = F, warnings =F}
+source("../../0_R_analysis_setup_file.R")
+
+```
+
+
+```{r, include = F, echo = F}
+
+######### lmer Version #######
+condslope.lmer.slopes <- function(x, z, c, y){
+#  condslope.lmer( "age1","GROUP", 0, Hipp_piecewise_orig)
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work. 
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+zx <- paste(z, x, sep = ":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[xz]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+coef4.var <- subset(modtidy, rownames == xz)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, xz])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 2), w1.slope=round(w1.slope, digits = 2),
+            df = subset(modtidy, rownames == x)$df,
+            t.val = round(t.val, digits = 2), p.val = round(p.val, digits = 3), 
+            lower95 = round(lower95, digits = 2), 
+            upper95 = round(upper95, digits = 2)))
+}
+
+
+condslope.lmer.pointestimates <- function(x, z, c, y){
+#  condslope.lmer( "age1","GROUP", 0, Hipp_piecewise_orig)
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*z
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work. 
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[xz]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+
+coef4.var <- subset(modtidy, rownames == xz)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, xz])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 2), w1.slope=round(w1.slope, digits = 2),
+            df = subset(modtidy, rownames == x)$df,
+            t.val = round(t.val, digits = 2), p.val = round(p.val, digits = 3), 
+            lower95 = round(lower95, digits = 2), 
+            upper95 = round(upper95, digits = 2)))
+}
+
+
+```
+
+# load data 
+check scanner confound variable
+
+```{r}
+load("../../../data/2_fs_data/3_cleaned_fsdata_for_growth_chart_brain_age_yrs4_19.Rdata")
+
+fsdata6$scanner_confound <-with(fsdata6, ifelse(index_wave == 3, 0, 1))
+```
+
+
+## rescale variables 
+for coefficients to be interpretable
+```{r}
+
+fsdata6$Hipp_ave <- fsdata6$Hipp_ave/100
+# NOTE: ICV NEEDS TO BE RESCALED FOR SIMILAR SD RANGE AND INTERPRETABLE COEFFICIENTS
+fsdata6$ICV <- fsdata6$ICV/100000
+
+fsdata6$sex.f <- as.factor(ifelse(fsdata6$sex == 0, 0, 1 ))
+
+hist(fsdata6$Hipp_ave)
+
+```
+
+
+## mean center stuff
+
+```{r}
+fsdata6$brain_age_yrs.c <- fsdata6$brain_age_yrs - mean(fsdata6$brain_age_yrs)
+fsdata6$sex.c <- fsdata6$sex - mean(fsdata6$sex)
+# main effect of age =squared 
+fsdata6$age_squared <- fsdata6$brain_age_yrs^2
+fsdata6$age_squared.c <- fsdata6$age_squared - mean(fsdata6$age_squared)
+fsdata6$ICV.c <- fsdata6$ICV - mean(fsdata6$ICV)
+fsdata6$meds.c <- fsdata6$ICV - mean(fsdata6$ICV)
+fsdata6$motion_ave_new.c  <- fsdata6$motion_ave_new - mean(fsdata6$motion_ave_new)
+fsdata6$scanner_confound.c <- fsdata6$scanner_confound - mean(fsdata6$scanner_confound)
+fsdata6$Right.hippocampus <- fsdata6$Right.Hippocampus / 100
+fsdata6$Left.hippocampus <- fsdata6$Left.Hippocampus / 100
+
+```
+
+## remove outliers for left & right Hipp 
+
+```{r}
+#fsdata6 <- fsdata6 %>%
+ # mutate(Right.Hipp.Cleaned = ifelse(Right.hippocampus > 3*sd(Right.hippocampus) + mean(Right.hippocampus), NA, Right.hippocampus),
+  #       Left.Hipp.Cleaned = ifelse(Left.hippocampus > 3*sd(Left.hippocampus) + mean(Left.hippocampus), NA, Left.hippocampus))
+
+fsdata6 <- fsdata6[
+  with(fsdata6, order(GROUP, index_wave)),
+]
+
+# select variables you want outliers for
+var_list <- fsdata6 %>% dplyr::select(Right.hippocampus, Left.hippocampus)
+var_list <- names(var_list)
+# make an empty dataframe to store new stuff into 
+outlier_list <- NA
+# run through loop of each variable 
+for (var in var_list){
+    print (var)
+  # use dplyr magic to get all of the info you need.
+  outlier_groups <- fsdata6 %>% 
+    # group by GROUP and TIMEPOINT.
+      dplyr::select (var, GROUP, index_wave) %>% 
+         group_by(GROUP, index_wave) %>% # sort data by group and tp 
+         dplyr::summarize_all(funs(mean(., na.rm = T), sd(., na.rm = T)))         
+    # get the means, SD, upper and lower limit (3 SD above or below mean) for 
+   outlier_groups$upper <- outlier_groups$mean + 3*outlier_groups$sd 
+   outlier_groups$lower <-  outlier_groups$mean - 3*outlier_groups$sd 
+   
+   # restart these here, because they will generated anew for each variable.
+
+    outlier_list <- data.frame()
+# for each grouping in outlier_groups, find outliers and mark them. 
+for (i in 1:nrow(outlier_groups)){
+  print(i)
+  # which group is this? PI or comp
+  group <- outlier_groups$GROUP[i]
+  tp <- outlier_groups$index_wave[i]
+  # set the max and minimum values of cortisol that we will use as outlier threshold
+  lower_limits <- outlier_groups$lower[i]
+  upper_limits <- outlier_groups$upper[i]
+  # get all of the original data by group & wave
+  data_chunk <- subset(fsdata6,  GROUP== group & index_wave == tp)
+ # make sure you're only calculating outliers for the correct variable 
+  variable <- data_chunk %>% dplyr::select(var)
+   # mark the outliers as 1
+  mark_outliers <- data.frame(ifelse(variable[1] >= upper_limits
+                          | variable <= lower_limits, 1, 0))
+   # make sure this name matches the variable name (e.g. L hipp)
+  names(mark_outliers) <- paste0(var, "_outliers")
+  # save the outlier 1s and 0s into a new column 
+  outlier_list <- rbind(outlier_list, mark_outliers)
+  # make sure the column name matches the variable name (e.g. L hipp)
+  names(outlier_list) <- paste0(var, "_outliers")
+} 
+  #print ("loop break")
+  # add the new column of outliers for each variable (e.g. L hipp) to the orig dataframe. 
+   fsdata6 <- cbind(fsdata6, outlier_list) 
+   
+}
+
+```
+
+## count outliers by group and wave
+```{r}
+  
+# use dplyr magic to get all of the info you need.
+fsdata_outlier_table <- fsdata6 %>%    
+         group_by(GROUP, index_wave) %>% # sort data by group and wave 
+         dplyr::summarize(N= n(), 
+                   RHipp_outliers = sum(Right.hippocampus_outliers),
+                  LHipp_outliers = sum(Left.hippocampus_outliers))
+
+fsdata_outlier_table
+
+save(fsdata_outlier_table,file = "tables/Right_and_Left_Hipp_outliers.Rdata")
+
+
+fsdata6$Right.Hipp.Cleaned <- ifelse(fsdata6$Right.hippocampus_outliers == 1, NA, fsdata6$Right.hippocampus)
+fsdata6$Left.Hipp.Cleaned <- ifelse(fsdata6$Left.hippocampus_outliers == 1, NA, fsdata6$Left.hippocampus)
+
+```
+
+
+# 1) Right hemisphere alone 
+
+## descriptives
+```{r}
+
+ggplot(fsdata6, aes(x =brain_age_yrs, y = Right.Hipp.Cleaned, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth() 
+
+```
+
+
+## group main effect
+```{r, warnings = F}
+# same for ICV. 
+RHipp_group_model <- lmer(Right.Hipp.Cleaned ~ brain_age_yrs + GROUP + sex.c + ICV.c 
+                     + motion_ave_new.c + 
+                 scanner_confound.c +(1 | IDENT_SUBID), data = fsdata6)
+
+summary(RHipp_group_model)
+
+save(RHipp_group_model, file = "model_output/Right_Hipp_group_model_results.Rdata")
+```
+
+##  group x age: NS
+```{r, warnings = F}
+# same for ICV. 
+RHipp_groupxage_model <- lmer(Right.Hipp.Cleaned ~ brain_age_yrs * GROUP + sex.c + ICV.c 
+                     + motion_ave_new.c + 
+                 scanner_confound.c +(1 | IDENT_SUBID), data = fsdata6)
+
+summary(RHipp_groupxage_model )
+save(RHipp_groupxage_model , file = "model_output/Right_Hipp_groupxage_model_results.Rdata")
+```
+
+### graph model with raw data 
+```{r, warnings = F}
+
+#  graph the model and confirm the post-hoc tests!! 
+effect_Hipp <- as.data.frame(effect("brain_age_yrs:GROUP", RHipp_groupxage_model, confint=TRUE, xlevels = list(brain_age_yrs=c(min(fsdata6$brain_age_yrs), min(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]), mean(fsdata6$brain_age_yrs),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "COMP"])))))
+# remove oldest and youngest PI age ranges. 
+effect_Hipp <- effect_Hipp %>%
+  filter(! (GROUP == "PI" & brain_age_yrs == min(brain_age_yrs[GROUP == "COMP"]))
+         & !(GROUP == "PI" & brain_age_yrs == max(brain_age_yrs[GROUP == "COMP"])))
+
+RHipp_linear_plot_with_raw <- ggplot(effect_Hipp, 
+                                    aes(x = brain_age_yrs, y = fit, color = GROUP)) +
+    geom_line(size = 1) + #facet_grid (~GROUP) + 
+    theme_classic() + ylab(bquote('hippocampus Volume '*(mm/100)^3*'')) + 
+    xlab ("Age (years)") + my_colors + my_colors2 + 
+    # add raw data points! 
+    geom_point(data = fsdata6, aes(x = brain_age_yrs, y = Right.Hipp.Cleaned, color = GROUP),
+              size = 1, alpha = 0.2) + 
+    geom_line(data = fsdata6, aes(x = brain_age_yrs, y = Right.Hipp.Cleaned, group = IDENT_SUBID), alpha = 0.2) +
+    scale_x_continuous(breaks = seq(4,21.5, by = 3)) +  theme(legend.position="none")
+
+#pdf (file = "figures/hippocampus_linear_model_overlapping.#pdf", width = 6 , height = 4)
+RHipp_linear_plot_with_raw
+#dev.off()
+
+#pdf (file = "figures/hippocampus_linear_model_overlapping_CI.#pdf", width = 6 , height = 4)
+RHipp_linear_plot_with_raw + geom_ribbon(aes(ymin=lower, ymax=upper, 
+                  group = GROUP, fill = GROUP), alpha =0.2, color = NA) 
+#dev.off()
+
+```
+
+
+
+
+
+
+# 2) Left hemisphere alone
+
+## 1) linear model with group main effect
+```{r, warnings = F}
+# same for ICV. 
+LHipp_group_model <- lmer(Left.Hipp.Cleaned ~ brain_age_yrs  + GROUP + sex.c + ICV.c 
+                     + motion_ave_new.c + 
+                 scanner_confound.c +(1 | IDENT_SUBID), data = fsdata6)
+
+summary(LHipp_group_model )
+save(LHipp_group_model  , file = "model_output/Left_Hipp_group_model_results.Rdata")
+
+```
+
+```{r, warnings = F}
+# same for ICV. 
+LHipp_groupxage_model  <- lmer(Left.Hipp.Cleaned ~ brain_age_yrs *GROUP + sex.c + ICV.c 
+                     + motion_ave_new.c + 
+                 scanner_confound.c +(1 | IDENT_SUBID), data = fsdata6)
+
+summary(LHipp_groupxage_model)
+
+save(LHipp_groupxage_model, file = "model_output/Left_Hipp_groupxage_model_results.Rdata")
+
+```
+
+### graph model with raw data 
+```{r, warnings = F}
+
+#  graph the model and confirm the post-hoc tests!! 
+effect_Hipp <- as.data.frame(effect("brain_age_yrs:GROUP", LHipp_groupxage_model, confint=TRUE, xlevels = list(brain_age_yrs=c(min(fsdata6$brain_age_yrs), min(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]), mean(fsdata6$brain_age_yrs),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "COMP"])))))
+# remove oldest and youngest PI age ranges. 
+effect_Hipp <- effect_Hipp %>%
+  filter(! (GROUP == "PI" & brain_age_yrs == min(brain_age_yrs[GROUP == "COMP"]))
+         & !(GROUP == "PI" & brain_age_yrs == max(brain_age_yrs[GROUP == "COMP"])))
+
+LHipp_linear_plot_with_raw <- ggplot(effect_Hipp, 
+                                    aes(x = brain_age_yrs, y = fit, color = GROUP)) +
+    geom_line(size = 1) + #facet_grid (~GROUP) + 
+    theme_classic() + ylab(bquote('hippocampus Volume '*(mm/100)^3*'')) + 
+    xlab ("Age (years)") + my_colors + my_colors2 + 
+    # add raw data points! 
+    geom_point(data = fsdata6, aes(x = brain_age_yrs, y = Left.Hipp.Cleaned, color = GROUP),
+              size = 1, alpha = 0.2) + 
+    geom_line(data = fsdata6, aes(x = brain_age_yrs, y = Left.Hipp.Cleaned, group = IDENT_SUBID), alpha = 0.2) +
+    scale_x_continuous(breaks = seq(4,21.5, by = 3)) +  theme(legend.position="none")
+
+#pdf (file = "figures/hippocampus_linear_model_overlapping.#pdf", width = 6 , height = 4)
+LHipp_linear_plot_with_raw
+#dev.off()
+
+#pdf (file = "figures/hippocampus_linear_model_overlapping_CI.#pdf", width = 6 , height = 4)
+LHipp_linear_plot_with_raw + geom_ribbon(aes(ymin=lower, ymax=upper, 
+                  group = GROUP, fill = GROUP), alpha =0.2, color = NA) 
+#dev.off()
+
+```
+
+
+
+# 3) Sex effects 
+
+## N for sex by wave
+```{r}
+summary(fsdata6$sex.f)
+sex_Hipp_table <- fsdata6 %>%
+  group_by(GROUP, index_wave, sex.f) %>%
+  dplyr::summarize(N = n())
+sex_Hipp_table
+save(sex_Hipp_table, file = "tables/Sex_by_group_and_wave_for_Hipp_data.Rdata")
+```
+
+## we already know main effect of sex on hippocampus.
+## group x sex interaction on hippocampus
+```{r}
+fsdata6$GROUP.n <- as.factor(ifelse(fsdata6$GROUP == "COMP", 0, 1))
+
+Hipp_groupxsex_model  <- lmer(Hipp_ave ~ GROUP.n* sex.f + 
+                ICV.c + motion_ave_new.c + scanner_confound +brain_age_yrs.c +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Hipp_groupxsex_model) 
+save(Hipp_groupxsex_model, file = "model_output/Sex_Hipp_groupxsex_model_results.Rdata")
+
+```
+
+## plot the sex effects 
+```{r}
+effect_df <- data.frame(effect("GROUP.n:sex.f", Hipp_groupxsex_model)) %>%
+  mutate(GROUP = ifelse(GROUP.n == 0, "COMP", "PI"), 
+         Sex = ifelse(sex.f == 0, "Male", "Female"))
+
+effect_plot <- ggplot(data = effect_df, aes(x = GROUP, y = fit,
+                                            fill = GROUP, color = GROUP)) + 
+  geom_point(size = 3) + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.5) + 
+  ylab("Hippocampal Volume") + xlab("GROUP") + facet_grid(~Sex) + 
+  geom_jitter(data =  fsdata6, aes(x = GROUP, y = Hipp_ave), 
+              alpha = 0.12, width= 0.15) + 
+  theme_classic() + my_colors + theme(legend.position = "none")
+
+effect_plot
+
+ggsave(effect_plot, file = "figures/Hipp_volume_by_groupxSex.pdf", width = 6, height = 4)
+```
+
+## post-hoc test on group x sex effect - driven by what conditions?
+```{r}
+## GETTING SLOPES FOR AGE EFFECTS, PER GROUP
+male_group_diff <- data.frame(sex = "male", condslope.lmer.pointestimates( "GROUP.n1","sex.f1", 0, Hipp_groupxsex_model))
+female_group_diff <- data.frame(sex = "female", condslope.lmer.pointestimates("GROUP.n1", "sex.f1", 1, Hipp_groupxsex_model))
+
+# need to flip the X:Z interaction order for the sake of the condslope function. 
+Hipp_groupxsex_model2 <- lmer(Hipp_ave ~ sex.f*GROUP.n +
+                brain_age_yrs.c +  
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Hipp_groupxsex_model2)
+
+COMP_sex_diff <- data.frame(sex = "COMP",condslope.lmer.pointestimates( "sex.f1","GROUP.n1", 0, Hipp_groupxsex_model2))
+PI_sex_diff <- data.frame(sex = "PI", condslope.lmer.pointestimates("sex.f1","GROUP.n1", 1, Hipp_groupxsex_model2))
+
+sex_Hipp_posthoc_tests <- rbind(male_group_diff, female_group_diff, COMP_sex_diff, PI_sex_diff)
+
+sex_Hipp_posthoc_tests <- sex_Hipp_posthoc_tests %>%
+  dplyr::select(-w0.intercept)
+names(sex_Hipp_posthoc_tests) <- c("GROUP", "Estimate", "df", "t.value", "p.value", "lower.95%.CI", "upper.95.CI%")
+sex_Hipp_posthoc_tests
+save(sex_Hipp_posthoc_tests, file = "model_output/sexXgroup_Hipp_posthoc_tests.Rdata")
+```
+
+## does sex interact with  age? NO. 
+```{r}
+
+Hipp_agexsex_model <- lmer(Hipp_ave ~  GROUP*sex.f + 
+                GROUP + brain_age_yrs.c * sex.f +
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Hipp_agexsex_model) 
+save(Hipp_agexsex_model, file = "model_output/SexXage_hipp_model_results.Rdata")
+
+```
+
+## 3 way group x sex x age interaction? No. 
+```{r}
+# linear
+Hipp_sexgroupage_model <- lmer(Hipp_ave ~ 
+                GROUP*brain_age_yrs.c * sex.f +
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Hipp_sexgroupage_model) 
+save(Hipp_sexgroupage_model, file = "model_output/SexXgroupXage_Hipp_model_results.Rdata")
+
+```
+
+
+# 4) AGE OF ADOPTION IN PIS 
+```{r}
+load("../../../data/3_ALL_long_cort_symptoms_brain_structure_all_ages_2019-11-12.Rdata")
+
+nrow(monster_SB)
+nrow(fsdata6)
+vars_keep <- monster_SB %>%
+  dplyr::select(IDENT_SUBID, index_wave, IAI_3_AGEORPH, IAI_7_AGEADOPT, PDS_mean, testos, testos_normed, batch) %>%
+  mutate(age_adopt_log = log(IAI_7_AGEADOPT + 0.4), 
+         age_placed_log = log(IAI_3_AGEORPH + 0.4)) %>%
+  mutate(duration_adversity = (IAI_7_AGEADOPT - IAI_3_AGEORPH)) %>%
+  mutate(duration_split = as.factor(ifelse(duration_adversity > median(duration_adversity, na.rm = T), "late", "early"))) 
+
+
+# also adding puberty and other variables we will need later
+fsdata_pds <- merge(fsdata6, vars_keep,  by = c("IDENT_SUBID", "index_wave"))
+#nrow(fsdata_pds) # successfully added variables but kept all rows.
+nrow(fsdata6)
+```
+
+## subset only PIs for the adoption duration analysis 
+```{r}
+fsdata_adopt <- subset(fsdata_pds, GROUP == "PI") # & !is.na(duration_split))
+nrow(fsdata_adopt)
+
+```
+
+
+## ALL SUBJECTS linear models 
+### log age of adoption: NS
+```{r}
+# linear model...which makes sense in the PIs because they don't have amyg changes. 
+hipp_logageadopt <- lmer(Hipp_ave ~  brain_age_yrs.c + age_adopt_log + #age_placed_log +  
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_adopt)
+
+summary(hipp_logageadopt)
+save(hipp_logageadopt, file = "model_output/logageadopt_hipp_main_effect_model_results.Rdata")
+```
+
+### log age of adoption with age placed: NS
+```{r}
+# linear model...which makes sense in the PIs because they don't have amyg changes. 
+hipp_logageadopt_logageplaced <- lmer(Hipp_ave ~  brain_age_yrs.c + age_adopt_log + age_placed_log +  
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_adopt)
+
+summary(hipp_logageadopt_logageplaced)
+save(hipp_logageadopt_logageplaced, file = "model_output/logageadopt_logageplaced_hipp_main_effect_model_results.Rdata")
+```
+
+
+
+
+# 5) PDS SCALE
+
+## get info on how many subjects have this...
+
+
+## linear group x PDS effects: WITH AGE (NS)
+```{r}
+Hipp_PDS_age <- lmer(Hipp_ave ~  brain_age_yrs.c +
+                GROUP + PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Hipp_PDS_age ) 
+save(Hipp_PDS_age, file = "model_output/PDS_with_age_Hipp_model_results.Rdata" )
+
+
+Hipp_PDSxgroup_age <- lmer(Hipp_ave ~ brain_age_yrs.c + 
+                GROUP*PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Hipp_PDSxgroup_age ) 
+
+save(Hipp_PDSxgroup_age, file = "model_output/PDSxgroup_with_age_Hipp_model_results.Rdata" )
+```
+
+
+## linear group x PDS effects: WITHOUT AGE (NS)
+```{r}
+# ages centered at bp,
+Hipp_PDS_no_age <- lmer(Hipp_ave ~  
+                GROUP + PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Hipp_PDS_no_age ) 
+save(Hipp_PDS_no_age, file = "model_output/PDS_no_age_Hipp_model_results.Rdata" )
+
+# ages centered at bp,
+Hipp_PDSxgroup_no_age <- lmer(Hipp_ave ~  
+                GROUP*PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Hipp_PDSxgroup_no_age ) 
+
+save(Hipp_PDSxgroup_no_age, file = "model_output/PDSxgroup_without_age_Hipp_model_results.Rdata" )
+```
+
+
+
+
+# 6) TESTOS 
+
+## center
+```{r}
+fsdata_pds$GROUP.n <- as.factor(ifelse(fsdata_pds$GROUP == "COMP", 0, 1))
+summary(fsdata_pds$GROUP.n)
+fsdata_pds$testos_normed.c <- fsdata_pds$testos_normed - mean(fsdata_pds$testos_normed, na.rm = T)
+summary(fsdata_pds$testos_normed.c)
+```
+
+
+## plot testos vs. age in males vs. females
+fixed! only one row of data per subject per wave. 
+```{r}
+
+ggplot(fsdata_pds, aes(x =brain_age_yrs, y = testos, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = "lm") + facet_grid(~sex)
+
+```
+
+consistent across waves!!!
+```{r}
+ggplot(fsdata_pds, aes(x =brain_age_yrs, y = testos, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = "lm") + facet_grid(~index_wave)
+nrow(fsdata_pds)
+```
+
+## linear group x testos normed: WITH AGE
+```{r}
+
+Hipp_testos_normed_with_age <- lmer(Hipp_ave ~ batch + 
+                GROUP.n + testos_normed.c + brain_age_yrs.c + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Hipp_testos_normed_with_age) 
+save(Hipp_testos_normed_with_age, file  = "model_output/testos_normed_with_age_Hipp_model_results.Rdata")
+
+# same with or without age in the model. 
+Hipp_testos_normedxgroup_with_age <- lmer(Hipp_ave ~ 
+                testos_normed.c*GROUP.n + brain_age_yrs.c +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Hipp_testos_normedxgroup_with_age) 
+
+save(Hipp_testos_normedxgroup_with_age, file  = "model_output/testos_normedxgroup_with_age_Hipp_model_results.Rdata")
+
+```
+
+
+## plot effect
+volume increases in COMPS with increasing testosterone
+decreases in PIs with increasing testosterone
+```{r}
+plot(effect("testos_normed.c:GROUP.n", Hipp_testos_normedxgroup_with_age), multiline = T)
+
+```
+
+
+## linear group x testos normed: WITHOUT AGE.. secondary
+```{r}
+
+Hipp_testos <- lmer(Hipp_ave ~ batch + 
+                GROUP + testos_normed + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Hipp_testos) 
+save(Hipp_testos, file  = "model_output/testos_normed_Hipp_model_results.Rdata")
+
+# same with or without age in the model. 
+Hipp_testos_normedxgroup <- lmer(Hipp_ave ~ 
+                GROUP*testos_normed + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Hipp_testos_normedxgroup ) 
+
+save(Hipp_testos_normedxgroup, file  = "model_output/testos_normedxgroup_Hipp_model_results.Rdata")
+```
+
+## 7) Power analysis of main model 
+
+### observed power analysis
+```{r}
+# load model object 
+load("../manuscript/model_output/hipp_linear_main_effects_model_results.Rdata")
+model <- data.frame(summary(hipp_linear_main_effects)$coefficients)
+model$Coefficients <- rownames(model)
+
+# run 'observed power" calculation for your model with niall's function
+pow2 <- function (beta, se) {
+  z1mb = abs(beta/se) - 1.96
+  pow = (pnorm(abs(beta/se) - 1.96, mean = 0, sd = 1, lower.tail = TRUE))
+  result <- list("power"= pow)
+  return(result)
+}
+
+#  90 % power for the group effect.
+obs_pwr_group <- pow2(beta = model$Estimate[model$Coefficients == "GROUPPI"], se = model$Std..Error[model$Coefficients == "GROUPPI"])
+
+#  98 % power for age effect 
+obs_pwr_age <- pow2(beta = model$Estimate[model$Coefficients == "brain_age_yrs"], se = model$Std..Error[model$Coefficients == "brain_age_yrs"])
+
+obs_pwr_group
+obs_pwr_age
+
+save(obs_pwr_group, obs_pwr_age, file = "model_output/obs_pwr_hipp_main_effects.rda")
+```

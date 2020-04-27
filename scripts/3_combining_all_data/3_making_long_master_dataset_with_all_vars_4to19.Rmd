@@ -1,0 +1,409 @@
+---
+title: making long master dataset with cort & structural brain imaging & symptoms 
+author: "Michelle.VanTieghem"
+date: "June 12, 2018"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# Notes 
+##  making long-dataset of mutlilevel all variables \
+combining cort data  and brain data after removing outliers.
+ 
+## updates Oct 3, 2018 \
+made a second version that includes all longitudinal cortisol data  \
+so instead of 1 row per wave per subject (with summary cort data) \
+all cort days and times of day have their own row \
+and everything else is repeated! \
+
+## updated Jan 11, 2019 \
+To include all brain data ages 4-19 for this version. \
+
+## updated Feb 18, 2019  \
+To include all data ages 4-21 \
+made RCADS_age - based on wave completed. \
+made combiend age variable - across cort, brain, RCADS  \
+created age chart for paper.
+
+```{r, include = F, warnings =F}
+source("../0_R_analysis_setup_file.R")
+
+```
+
+
+# load data file for longitudinal cort: 1 row per data point 
+```{r}
+
+load("../../data/1_NEW_cort_and_T_marta_version_data/Cortisol_Ready_to_analyze.Rdata")
+nrow(cort_merge8)
+```
+
+## summarize cortisol across days - so just one waking / slope value per wave. 
+cort_merge9 has 1 row per wave per subject
+```{r}
+N_cort_check <- length(unique(cort_merge8$IDENT_SUBID))
+N_cort_check
+
+cort_merge8$GROUP.n <- as.numeric(ifelse(cort_merge8$GROUP == "COMP", 0, 1))
+cort_merge9 <- cort_merge8 %>% 
+  group_by(IDENT_SUBID, index_wave) %>%
+  summarise(GROUP = mean(GROUP.n), 
+            waking = mean(cort_values_fixed_no_outliers[time_of_day == "waking"],na.rm =T),
+            evening = mean(cort_values_fixed_no_outliers[time_of_day == "evening"],na.rm =T),
+            slope = mean(cort_values_fixed[time_of_day == "waking"],na.rm =T) - 
+            mean(cort_values_fixed_no_outliers[time_of_day == "evening"],na.rm =T), 
+            testos_normed = mean(testos_cleaned_log_wave_ave_gender_normed, na.rm = T),
+            testos = mean(testos_cleaned_log_wave_ave, na.rm = T), 
+            corrected_cort_age_mos = mean(corrected_cort_age_mos, na.rm = T),
+            corrected_cort_age_yrs = mean(corrected_cort_age_yrs, na.rm = T),
+            meds_by_wave = mean(as.numeric(meds_by_wave), na.rm = T), 
+            batch = mean(batch, na.rm = T)) 
+# FIXED BATCH TYPO!!!!
+sum(is.na(cort_merge9$batch))
+sum(is.na(cort_merge9$corrected_cort_age_yrs))
+
+# check N per wave. 
+cort_merge9 %>% 
+  group_by(GROUP, index_wave) %>%
+  dplyr::summarize(n= n() )
+nrow(cort_merge9)
+# make sure you didn't lose any subjects in this process! 
+N_cort_new <- length(unique(cort_merge9$IDENT_SUBID))
+identical(N_cort_check, N_cort_new)
+
+
+#head(cort_merge9)
+```
+
+
+## make a SUBJECTID_long variable to use for merging later
+```{r}
+# refactor this so it matches fsdata6
+cort_merge9$GROUP <- ifelse(cort_merge9$GROUP == 0, "COMP", "PI")
+# make this for mergeing. 
+cort_merge9$SUBJECTID_long <- ifelse(cort_merge9$index_wave == 2, 
+                                      paste0(cort_merge9$IDENT_SUBID, "_fu1"),
+                               ifelse(cort_merge9$index_wave == 3, 
+                                      paste0(cort_merge9$IDENT_SUBID, "_fu2"), 
+                                      as.character(cort_merge9$IDENT_SUBID)))
+
+length(unique(cort_merge9$IDENT_SUBID))
+length(unique(cort_merge9$SUBJECTID_long)) 
+nrow(cort_merge9)
+#head(cort_merge9)
+```
+
+
+# add freesurfer data
+note: this is already cleaned, and only ages 6-19.
+fsfdata6 has 1 row per subject per wave
+```{r}
+load("../../data/2_fs_data/3_cleaned_fsdata_for_growth_chart_brain_age_yrs4_19.Rdata")
+nrow(fsdata6)
+range(fsdata6$brain_age_yrs) 
+range(cort_merge9$corrected_cort_age_yrs) 
+```
+
+## merge cort dataset with brain dataset 
+note: using "type = full" to keep all data with brains, even if they don't have cort.
+this is just basically for later, calculating who does and doesn't have what! 
+merged_df still has 1 row per subject per wave 
+```{r}
+
+# MERGING ALL TOGETHER AND KEEPING ALL ! 
+merged_df <- merge(cort_merge9, fsdata6, by = c("SUBJECTID_long", "IDENT_SUBID", "index_wave", "GROUP"), all = T)
+nrow(merged_df)
+#head(merged_df)
+
+```
+
+
+# fix formatting & add variables 
+```{r}
+# chek everyone has a subid.
+sum(is.na(merged_df$IDENT_SUBID))
+nrow(merged_df)
+
+# check that wave got encoded corretly. 
+summary(merged_df$index_wave)
+
+```
+
+## add more variables you need from master! 
+only getting partial master data, stuff i will need.
+```{r}
+
+master <- read.csv("../../data/master/J.Data_Entry_Master_8_17_2017_fixed_fixed.csv")
+
+adopt_vars <- names(master)[grepl("ADOPT", names(master)) |grepl("IAI", names(master)) ]
+med_vars <- names(master)[grepl("MEDS", names(master))]
+RCADS_vars <- names(master)[grepl("RCADS", names(master))]
+CBCL_vars <- names(master)[grepl("CBCL_4", names(master))]
+genotype <-  names(master)[grepl("BDNF", names(master))]
+demo <- names(master)[grepl("DEM", names(master))]
+ident <- names(master)[grepl("IDENT", names(master))]
+ident <- ident[1:6]
+session <- names(master)[grepl("ession", names(master))]
+pub_vars <- names(master)[grepl("PDS", names(master))]
+master2 <- master %>%
+  dplyr::select(WASI_FSIQ,  ident, demo,session, adopt_vars, med_vars, RCADS_vars, CBCL_vars, genotype, pub_vars)
+
+# add in these variables into long format! 
+# note not using "full" option here, because don't want anyone included 
+# in the dataset who doesn't have at least ONE VARIABLE of interest.
+merged_final <- merge(merged_df, master2, by = "IDENT_SUBID")
+nrow(merged_final)
+#head(merged_final)
+nrow(merged_df)
+summary(as.factor(merged_final$IDENT_SUBTYPE))
+# for now, keep everyone in here so we ca check
+```
+
+
+## add symptoms in long -repeated format! 
+add columns to long dataset that consist of repeated symptoms at each wave
+```{r, warnings = F, include = F }
+sublist <- unique(merged_final$IDENT_SUBID)
+length(sublist)
+#for each subject{
+for (subject in sublist){
+######### WAVE 1
+ merged_final$CBCL_tot_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 1] <-
+  merged_final$CBCL_4_TOTPROB_T[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+ 
+  merged_final$CBCL_tot_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 1] <-
+  merged_final$CBCL_4_TOTPROB_TOT[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+ 
+  
+  merged_final$CBCL_int_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 1] <-
+  merged_final$CBCL_4_INTERNPROB_T[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+  
+    merged_final$CBCL_int_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 1] <-
+  merged_final$CBCL_4_INTERNPROB_TOT[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+ 
+   merged_final$CBCL_ext_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 1] <-
+  merged_final$CBCL_4_EXTERNPROB_T[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+   
+   
+   merged_final$CBCL_ext_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 1] <-
+  merged_final$CBCL_4_EXTERNPROB_TOT[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+   
+    merged_final$RCADS_int_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 1] <-
+  merged_final$J.RCADS_Total_Score_T_new[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+    
+    
+    merged_final$RCADS_int_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 1] <-
+  merged_final$J.RCADS_Total_Score_raw_new[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+ 
+     merged_final$RCADS_anx_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 1] <-
+  merged_final$J.RCADS_Anxiety_Total_T_new[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+     
+     
+     merged_final$RCADS_anx_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 1] <-
+  merged_final$J.RCADS_Anxiety_Total_raw_new[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+
+          merged_final$RCADS_MDD_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 1] <-
+  merged_final$J.RCADS_MDD_T_new[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+          
+          
+          merged_final$RCADS_MDD_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 1] <-
+  merged_final$J.RCADS_MDD_raw_new[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 1]
+
+     
+     ####### WAVE 2
+      merged_final$CBCL_tot_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 2] <-
+  merged_final$CBCL_4_TOTPROB_T_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+      
+      
+      merged_final$CBCL_tot_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 2] <-
+  merged_final$CBCL_4_TOTPROB_TOT_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+ 
+  merged_final$CBCL_int_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 2] <-
+  merged_final$CBCL_4_INTERNPROB_T_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+  
+  
+  merged_final$CBCL_int_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 2] <-
+  merged_final$CBCL_4_INTERNPROB_TOT_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+ 
+   merged_final$CBCL_ext_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 2] <-
+  merged_final$CBCL_4_EXTERNPROB_T_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+   
+  
+   merged_final$CBCL_ext_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 2] <-
+  merged_final$CBCL_4_EXTERNPROB_TOT_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+   
+    merged_final$RCADS_int_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 2] <-
+  merged_final$J.RCADS_Total_Score_t_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+    
+    
+    merged_final$RCADS_int_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 2] <-
+  merged_final$J.RCADS_Total_Score_raw_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+ 
+ 
+     merged_final$RCADS_anx_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 2] <-
+  merged_final$J.RCADS_Anxiety_Total_t_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+     
+     
+     merged_final$RCADS_anx_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 2] <-
+  merged_final$J.RCADS_Anxiety_Total_raw_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+
+        merged_final$RCADS_MDD_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 2] <-
+  merged_final$J.RCADS_MDD_T_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+        
+        
+        merged_final$RCADS_MDD_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 2] <-
+  merged_final$J.RCADS_MDD_raw_FU1[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 2]
+
+    ######### WAVE 3
+      merged_final$CBCL_tot_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 3] <-
+  merged_final$CBCL_4_TOTPROB_T_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+      
+      
+      merged_final$CBCL_tot_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 3] <-
+  merged_final$CBCL_4_TOTPROB_TOT_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+ 
+  merged_final$CBCL_int_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 3] <-
+  merged_final$CBCL_4_INTERNPROB_T_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+  
+  
+  merged_final$CBCL_int_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 3] <-
+  merged_final$CBCL_4_INTERNPROB_TOT_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+ 
+   merged_final$CBCL_ext_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 3] <-
+  merged_final$CBCL_4_EXTERNPROB_T_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+   
+   
+   merged_final$CBCL_ext_raw_long[merged_final$IDENT_SUBID == subject &   merged_final$index_wave == 3] <-
+  merged_final$CBCL_4_EXTERNPROB_TOT_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+   
+    merged_final$RCADS_int_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 3] <-
+  merged_final$J.RCADS_Total_Score_t_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+ 
+    merged_final$RCADS_int_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 3] <-
+  merged_final$J.RCADS_Total_Score_raw_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+    
+     merged_final$RCADS_anx_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 3] <-
+  merged_final$J.RCADS_Anxiety_Total_t_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+     
+     
+     merged_final$RCADS_anx_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 3] <-
+  merged_final$J.RCADS_Anxiety_Total_raw_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+
+       merged_final$RCADS_MDD_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 3] <-
+  merged_final$J.RCADS_MDD_T_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+       
+       
+       merged_final$RCADS_MDD_raw_long[merged_final$IDENT_SUBID == subject &  merged_final$index_wave == 3] <-
+  merged_final$J.RCADS_MDD_raw_FU2[merged_final$IDENT_SUBID == subject & merged_final$index_wave == 3]
+
+     }
+
+check_vars <- merged_final[names(merged_final)[grepl("long", names(merged_final))]]
+#head(check_vars)
+```
+
+
+## add puberty scores at each wave
+
+```{r}
+# Calculating mean Petersen development score! # skip number 5 for females 
+# http://www.sleepforscience.org/contentmgr/showdetails.php/id/91
+
+# calculate means first. 
+merged_final$PDS_female_mean <- ifelse(merged_final$index_wave == 1, ((merged_final$PPDS_F_1 + merged_final$PPDS_F_2 + merged_final$PPDS_F_3 + merged_final$PPDS_F_4 +merged_final$PPDS_F_5)/5),
+                                ifelse(merged_final$index_wave == 2, ((merged_final$PPDS_F_1_FU1 + merged_final$PPDS_F_2_FU1 + merged_final$PPDS_F_3_FU1 + merged_final$PPDS_F_4_FU1 +merged_final$PPDS_F_5_FU1)/5),
+                                  ifelse(merged_final$index_wave == 3, ((merged_final$PPDS_F_1_FU2 + merged_final$PPDS_F_2_FU2 + merged_final$PPDS_F_3_FU2 + merged_final$PPDS_F_4_FU1 +merged_final$PPDS_F_5_FU2)/5), NA)))
+
+merged_final$PDS_male_mean <- ifelse(merged_final$index_wave == 1, ((merged_final$PPDS_M_1 + merged_final$PPDS_M_2 + merged_final$PPDS_M_3 + merged_final$PPDS_M_4 +merged_final$PPDS_M_5)/5),
+                                ifelse(merged_final$index_wave == 2, ((merged_final$PPDS_M_1_FU1 + merged_final$PPDS_M_2_FU1 + merged_final$PPDS_M_3_FU1 + merged_final$PPDS_M_4_FU1 +merged_final$PPDS_M_5_FU1)/5),
+                                  ifelse(merged_final$index_wave == 3, ((merged_final$PPDS_M_1_FU2 + merged_final$PPDS_M_2_FU2 + merged_final$PPDS_M_3_FU2 + merged_final$PPDS_M_4_FU1 +merged_final$PPDS_M_5_FU2)/5), NA)))
+
+merged_final$PDS_mean <- ifelse(merged_final$DEM_3_GENDER_CHILD.y == 0, merged_final$PDS_male_mean, merged_final$PDS_female_mean)
+
+merged_final$has_puberty_baseline <-ifelse(!is.na(merged_final$PPDS_M_5) | !is.na(merged_final$PPDS_F_5), 1, 0)
+merged_final$has_puberty_FU1 <- ifelse(!is.na(merged_final$PPDS_M_5_FU1) | !is.na(merged_final$PPDS_F_5_FU1), 1, 0)
+merged_final$has_puberty_FU2 <- ifelse(!is.na(merged_final$PPDS_M_5_FU2) | !is.na(merged_final$PPDS_F_5_FU2), 1, 0)
+# lots of NAs...
+sum(is.na(merged_final$PDS_mean))
+ # we have very little puberty data!!
+sum(!is.na(merged_final$PDS_mean))
+
+nrow(merged_final)
+summary(merged_final$PDS_mean[merged_final$index_wave==1]) # sooo many missing from wave1 !!!! 
+summary(merged_final$PDS_mean[merged_final$index_wave==2])
+summary(merged_final$PDS_mean[merged_final$index_wave==3])
+```
+
+## calculate an age for RCADS.
+```{r}
+# there are subjects missing cort
+sum(is.na(merged_final$corrected_cort_age_yrs))
+sum(is.na(merged_final$waking))
+
+# there are subjects missing brain.
+sum(is.na(merged_final$brain_age_yrs))
+sum(is.na(merged_final$ICV))
+
+#  there are subjects missing RCADS. 
+sum(is.na(merged_final$RCADS_int_long))
+
+# get the RCADS age, based on sessions. 
+# RCADS baseline would have been collected at session 1 (behavior), not session 2 (first scan)
+# RCADS fu1 collected at session3 (scan fu1) and RCADS fu2 collected at session 4 (scan fu2)
+merged_final$RCADS_age <- with(merged_final, 
+                               ifelse((!is.na(RCADS_int_long) & index_wave == 1), 
+                                 SUBAGE_Session1.y, 
+                                 ifelse((!is.na(RCADS_int_long) & index_wave == 2),
+                                 SUBAGE_session3,
+                                 ifelse((!is.na(RCADS_int_long) & index_wave == 3),
+                                 SUBAGE_session4, NA))))
+sum(is.na(merged_final$RCADS_age))
+
+```
+
+## check age ranges across brain, cort, and RCADS 
+just doing some sanity checks.
+```{r}
+### check age ranges 
+range(merged_final$RCADS_age/12, na.rm = T) 
+# this is because RCADS was collected before first scan/ cortisol 
+
+range(merged_final$brain_age_yrs[merged_final$GROUP == "PI"], na.rm = T)
+range(merged_final$brain_age_yrs[merged_final$GROUP == "COMP"], na.rm = T)
+
+range(merged_final$corrected_cort_age_yrs[merged_final$GROUP == "PI"], na.rm = T)
+range(merged_final$corrected_cort_age_yrs[merged_final$GROUP == "COMP"], na.rm = T)
+
+# make an 'age' variable, that takes the ages available for a given time point. 
+monster_SB <- merged_final %>%
+  mutate(age = ifelse( !is.na(corrected_cort_age_yrs), corrected_cort_age_yrs, 
+                      ifelse(!is.na(brain_age_yrs), brain_age_yrs,
+                             ifelse(!is.na(RCADS_age), RCADS_age/12,NA))))
+
+monster_SB %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(min_cort_age = min(corrected_cort_age_yrs, na.rm = T), 
+            min_brain_age = min(brain_age_yrs, na.rm = T), 
+            min_age = min(age, na.rm = T))
+range(monster_SB$corrected_cort_age_yrs[merged_final$GROUP == "PI"], na.rm = T)
+range(merged_final$corrected_cort_age_yrs[merged_final$GROUP == "COMP"], na.rm = T)
+
+```
+
+## save data 
+this has one row per wave per subject
+```{r}
+
+save(monster_SB, file= "../../data/3_ALL_long_cort_symptoms_brain_structure_all_ages_2019-11-12.Rdata")
+
+```
+
+
+

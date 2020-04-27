@@ -1,0 +1,188 @@
+---
+title: "Growth chart for Hippocampus volume ages 4+"
+author: "Michelle.VanTieghem"
+date: "October 16, 2018"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+
+# Readme
+Analysis of hippocampal volume, main results
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+keep_legend <- theme(legend.position= c(0.90, 0.10),  legend.key.height = unit(0.05, "cm"), legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black"))
+```
+
+# load data
+```{r}
+load("../../../data/2_fs_data/3_cleaned_fsdata_for_growth_chart_brain_age_yrs4_19.Rdata")
+
+fsdata6$scanner_confound <-with(fsdata6, ifelse(index_wave == 3, 0, 1))
+```
+
+# Hippocampus VOLUMES
+## plots of raw data for left hipp
+```{r, warnings = F}
+ ggplot(fsdata6, aes(x =brain_age_yrs, y = Left.Hippocampus, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) +  stat_smooth() + 
+  my_colors + my_colors2
+```
+
+
+## test differences between hemispheres? 
+### if not, averbrain_age_yrs them and use for subsequent analyses 
+```{r, warnings = F}
+RA <- ggplot(fsdata6, aes(x = Right.Hippocampus, y = Left.Hippocampus, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm') + 
+  my_colors + my_colors2
+RA
+```
+
+
+## Bilateral Hippocampus 
+probably quadratic in comps. 
+```{r, warnings = F}
+ggplot(fsdata6, aes(x =brain_age_yrs, y = Hipp_ave, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth() + 
+  my_colors + my_colors2
+
+```
+
+# fix up variables
+## rescale variables 
+for coefficients to be interpretable
+```{r}
+
+fsdata6$Hipp_ave <- fsdata6$Hipp_ave/100
+# NOTE: ICV NEEDS TO BE RESCALED FOR SIMILAR SD RANGE AND INTERPRETABLE COEFFICIENTS
+fsdata6$ICV <- fsdata6$ICV/100000
+
+```
+
+
+## mean center stuff
+
+```{r}
+fsdata6$brain_age_yrs.c <- fsdata6$brain_age_yrs - mean(fsdata6$brain_age_yrs)
+fsdata6$sex.c <- fsdata6$sex - mean(fsdata6$sex)
+# main effect of age =squared 
+fsdata6$age_squared <- fsdata6$brain_age_yrs^2
+fsdata6$age_squared.c <- fsdata6$age_squared - mean(fsdata6$age_squared)
+fsdata6$ICV.c <- fsdata6$ICV - mean(fsdata6$ICV)
+fsdata6$meds.c <- fsdata6$ICV - mean(fsdata6$ICV)
+fsdata6$motion_ave_new.c  <- fsdata6$motion_ave_new - mean(fsdata6$motion_ave_new)
+fsdata6$scanner_confound.c <- fsdata6$scanner_confound - mean(fsdata6$scanner_confound)
+
+```
+
+
+# AGE MODELS FOR Hippocampus
+do brain_age_yrs and group interact to predict change in Hippocampus? 
+using lmer, mixed effects - random intercepts for subject only. 
+
+
+## linear model with age X group interaction
+```{r, warnings = F}
+# same for ICV. 
+hipp_linear <- lmer(Hipp_ave ~ brain_age_yrs *GROUP + sex.c + ICV.c 
+                     + motion_ave_new.c + 
+                 scanner_confound.c + (1 | IDENT_SUBID), 
+                 data = subset(fsdata6, brain_age_yrs < 20))
+
+
+summary(hipp_linear)
+save(hipp_linear, file = "model_output/hipp_linear_model_results.Rdata")
+
+```
+
+
+## main effects linear model - no interaction
+```{r, warnings = F}
+# same for ICV.
+hipp_linear_main_effects <- lmer(Hipp_ave ~ brain_age_yrs + GROUP + sex.c + ICV.c 
+                     + motion_ave_new.c + 
+                 scanner_confound.c +(1 | IDENT_SUBID), 
+                 data = subset(fsdata6, brain_age_yrs < 20))
+
+
+summary(hipp_linear_main_effects)
+save(hipp_linear_main_effects, file = "model_output/hipp_linear_main_effects_model_results.Rdata")
+
+AIC(hipp_linear_main_effects)
+```
+
+
+## Calculate ICC for mixed effects
+```{r, warnings = F}
+# from simple model 
+mod <- lmer(Hipp_ave ~ (1 | IDENT_SUBID), data = fsdata6)
+icc(mod)
+ICC_hipp <- icc(mod)[1]
+save(ICC_hipp, file = "model_output/ICC_for_hippocampus.Rdata")
+
+
+# from final model with group main effect
+ICC_hipp_full_model <- icc(hipp_linear_main_effects)
+ICC_hipp_full_model
+save(ICC_hipp, file = "model_output/ICC_for_hippocampus_full_model.Rdata")
+
+
+# very similar!! 
+```
+
+
+## graph model fit with raw data
+note: plotting 2 lines, but NOT plotting results of NS interaction. 
+```{r, warnings = F}
+
+#  graph the model and confirm the post-hoc tests!! 
+effect_hipp <- as.data.frame(effect("brain_age_yrs:GROUP", 
+                                    hipp_linear_main_effects, confint=TRUE))
+
+hipp_linear_plot_with_raw <- ggplot(effect_hipp, 
+                                    aes(x = brain_age_yrs, y = fit, color = GROUP)) +
+   geom_line(size = 1) + #facet_grid (~GROUP) + 
+   theme_classic() + ylab(bquote('Hippocampus Volume '*(mm/100)^3*'')) + 
+  xlab ("Age (years)") + my_colors + my_colors2 + 
+   # add raw data points! 
+   geom_point(data = fsdata6, aes(x = brain_age_yrs, y = Hipp_ave, color = GROUP),
+              size = 1, alpha = 0.2) + 
+   geom_line(data = fsdata6, aes(x = brain_age_yrs, y = Hipp_ave, group = IDENT_SUBID), 
+             alpha = 0.2) + 
+  scale_x_continuous(breaks = seq(4,21.5, by = 2), limits = c(4, 21.5), expand = c(.02,0)) +
+ scale_y_continuous(expand = expand_scale(mult = c(0, .1))) +
+  theme(legend.position="none")
+
+pdf (file = "figures/Hippocampus_linear_model_with_raw.pdf", width = 6 , height = 4)
+hipp_linear_plot_with_raw
+dev.off()
+
+hipp_linear_plot <- hipp_linear_plot_with_raw +  geom_ribbon(aes(ymin=lower, ymax=upper, 
+                  group = GROUP, fill = GROUP), alpha =0.1, color = NA)
+pdf (file = "figures/Hippocampus_linear_model_with_raw_CI.pdf", width = 6 , height = 4)
+hipp_linear_plot
+dev.off()
+```
+
+SAVING TO POWERPT 
+```{r}
+
+ppt_test2 <- read_pptx() %>%
+  add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  ph_with_vg(code = print(hipp_linear_plot)) %>%
+  print(target = "../../../manuscript/figures/powerpoint_vector_figures/Feb_2020/Hippocampus_linear_model_with_raw_CI.pptx")
+  
+```
+

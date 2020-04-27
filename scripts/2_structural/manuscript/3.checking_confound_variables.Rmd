@@ -1,0 +1,376 @@
+---
+title: 'Checking confound variables: motion, aseg, scanner confound, ICV/GMV'
+author: "Michelle VanTieghem"
+date: "January 23, 2018"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# Readme:
+1) checking correlations  of confound variables  \
+2) checking categorical differences for sex, group, scanner \
+3) plotting effects of confound variables \
+
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+# load data 
+```{r}
+# removed outliers already
+load("../../../data/2_fs_data/3_cleaned_fsdata_for_growth_chart_brain_age_yrs4_19.Rdata")
+
+```
+
+
+
+# check correlations among variables 
+## hemisphere correlations 
+```{r, warnings = F}
+with(fsdata6, cor.test(Right.Hippocampus, Left.Hippocampus))
+with(fsdata6, cor.test(Right.Amygdala, Left.Amygdala))
+cor.test(fsdata6$Amyg_ave, fsdata6$Hipp_ave)
+```
+
+## continuous confound variables
+make correlation matrix of amyg vol, ICV, GBV, motion, and aseg 
+```{r, warnings = F}
+# select variables 
+my_data <- data.frame(with(fsdata6, cbind(brain_age_yrs, motion_ave_new, aseg_ave_rating, 
+                                 ICV, GMV, Amyg_ave,Hipp_ave)))
+names(my_data) <- c("brain_age_yrs",  "Motion", "Segmentation","ICV", "GMV", "Amygdala", "Hippocampus")
+# get the correlations
+
+cor.table <- cor(my_data)
+good_table <- round(cor.table, 2)
+good_table 
+save(good_table, file = "tables/confound_variable_correlation_matrix.Rdata")
+```
+
+```{r}
+# make an empty table.
+compiled_correlations <- data.frame(x = NA, y = NA, pvalue = NA)
+
+# for each column in mydata...
+for (i in 1:ncol(my_data)){
+  print (i)
+  var1 <- my_data[i]
+  var1_name <- names(var1)
+     var1_test <- as.matrix(var1)
+  # get every other column in the dataframe...
+  for (j in 1:ncol(my_data)){
+    print (j)
+     var2 <-my_data[j]
+     var2_name <- names(var2)
+     var2_test <- as.matrix(var2)
+     # run the correlation and save the p-value...
+     p_value <- cor.test(var1_test, var2_test)[3]
+     # keep the p-value 
+    row <- cbind(x=var1_name, y=var2_name, pvalue = p_value)
+    compiled_correlations <- rbind(compiled_correlations, row)
+
+  }
+}
+compiled_correlations$sig_level <- ifelse(compiled_correlations$pvalue < 0.001, '***', 
+                                          ifelse(compiled_correlations$pvalue < 0.01, '**',
+                                                 ifelse(compiled_correlations$pvalue < 0.05, '*', " ")))
+
+compiled_correlations$x <- unlist(compiled_correlations$x)
+compiled_correlations$y <- unlist(compiled_correlations$y)
+compiled_correlations$pvalue <- unlist(compiled_correlations$pvalue)
+head(compiled_correlations)
+save(compiled_correlations, file = "tables/confound_variable_correlations_with_pvalues.Rdata")
+```
+
+
+## t-test table for categorical vars
+testing for group, sex, scanner effects on Age, motion, segmentation quality.
+```{r}
+
+fsdata_by_sub <-fsdata6 %>%
+  group_by(IDENT_SUBID ) %>%
+  dplyr::summarize(GROUP = GROUP[1], 
+                   sex = sex[1],
+                   ICV = mean(ICV, na.rm = T),
+                   brain_age_yrs = mean(brain_age_yrs, na.rm = T),
+                   motion_ave_new = mean(motion_ave_new, na.rm = T), 
+                   aseg_ave_rating = mean(aseg_ave_rating, na.rm = T))
+
+# set up x andy variables 
+my_dataX <- data.frame(with(fsdata_by_sub, cbind(GROUP)))
+my_dataY <- data.frame(with(fsdata_by_sub, cbind(sex, brain_age_yrs, motion_ave_new, aseg_ave_rating, 
+                                 ICV)))
+
+# make an empty table.
+compiled_ttests <- data.frame(x = NA, y = NA, tvalue = NA, df = NA, pvalue = NA)
+
+# set up loop for making t-tests 
+# for each column in mydata...
+for (i in 1:ncol(my_dataX)){
+  print (i)
+  var1 <- my_dataX[i]
+  var1_name <- names(var1)
+     var1_test <- as.matrix(var1)
+  # get every other column in the dataframe...
+  for (j in 1:ncol(my_dataY)){
+   # print (j)
+     var2 <-my_dataY[j]
+     var2_name <- names(var2)
+     var2_test <- as.matrix(var2)
+     # run the correlation and save the p-value...
+     t_value <- t.test(var2_test ~ var1_test)[1]
+     d_f <- t.test(var2_test ~ var1_test)[2]
+     p_value <- t.test(var2_test ~ var1_test)[3]
+     # keep the p-value 
+    row <- cbind(x=var1_name, y=var2_name, tvalue = t_value, df = d_f, pvalue = p_value)
+    compiled_ttests <- rbind(compiled_ttests, row)
+
+  }
+}
+compiled_ttests$sig_level <- ifelse(compiled_ttests$pvalue < 0.001, '***', 
+                                          ifelse(compiled_ttests$pvalue < 0.01, '**',
+                                                 ifelse(compiled_ttests$pvalue < 0.05, '*', " ")))
+compiled_ttests$x <- unlist(compiled_ttests$x)
+compiled_ttests$y <- unlist(compiled_ttests$y)
+compiled_ttests$tvalue <- unlist(compiled_ttests$tvalue)
+compiled_ttests$df <- unlist(compiled_ttests$df)
+compiled_ttests$pvalue <- unlist(compiled_ttests$pvalue)
+compiled_ttests_brain <- compiled_ttests
+compiled_ttests_brain
+save(compiled_ttests_brain, file = "tables/confound_variable_t-tests_with_pvalues.Rdata")
+```
+
+
+# Testing group differences on whole brain measures
+while including effects of age, sex, scanner confound. 
+## main effect of group on ICV: PI < COMPS
+```{r}
+
+ICV_main <- lmer(ICV ~ brain_age_yrs + GROUP + sex +  scanner_confound +  motion_ave_new +
+                (1 | IDENT_SUBID), 
+              data = fsdata6)
+summary(ICV_main)
+```
+
+## no group x age interaction on ICV
+```{r}
+
+ICV_int <- lmer(ICV ~ brain_age_yrs * GROUP + sex +  scanner_confound + motion_ave_new +
+                (1 | IDENT_SUBID), 
+              data = fsdata6)
+summary(ICV_int)
+```
+
+plotting grorup effect
+```{r}
+# plotting group and age effects even though no interaction to show that there is no interaction! 
+effect_df <- data.frame(effect("brain_age_yrs:GROUP", ICV_main))
+ 
+ICV_plot <- ggplot(data = effect_df, aes(x = brain_age_yrs, y = fit)) +
+  geom_line(aes(color = GROUP) ) + 
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = GROUP), alpha = 0.2) +
+  geom_point(data = fsdata6,aes(x = brain_age_yrs, y = ICV, color = GROUP), alpha = 0.2 ) + 
+  geom_line(data = fsdata6, aes(x = brain_age_yrs, y = ICV, 
+                                group = IDENT_SUBID, color = GROUP), alpha = 0.2) +
+  theme_classic() + ylab (" ICV") + xlab ("Age (years)") +
+  my_colors + my_colors2 
+ICV_plot
+
+ggsave(ICV_plot, file = "figures/ICV_by_age_and_group.pdf")
+```
+
+plotting scanner effect
+```{r}
+# plotting group and age effects even though no interaction to show that there is no interaction! 
+effect_df <- data.frame(effect("scanner_confound", ICV_main)) 
+ 
+motion_plot <- ggplot(data = effect_df, aes(x = scanner_confound, y = fit)) +
+  geom_point(color = "red", size = 2) + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.1) +
+  geom_jitter(data = fsdata6,
+             aes(x = scanner_confound, y = ICV), alpha = 0.2, width = 0.1) + 
+  theme_classic() + ylab ("ICV") + xlab ("Scanner") +
+  my_colors + my_colors2 
+motion_plot
+
+ggsave(motion_plot, file = "figures/ICV_by_scanner.pdf")
+```
+
+
+## main effect of group on GMV: PI < COMPS
+```{r}
+
+GMV_main <- lmer(GMV ~ brain_age_yrs + GROUP + sex + scanner_confound + motion_ave_new +
+                (1 | IDENT_SUBID), 
+              data = fsdata6)
+summary(GMV_main)
+```
+
+## no group x age interaction on GMV
+```{r}
+
+GMV_int <- lmer(GMV ~ brain_age_yrs * GROUP + sex + scanner_confound + motion_ave_new +
+                (1 | IDENT_SUBID), 
+              data = fsdata6)
+summary(GMV_int)
+```
+
+plotting effect
+```{r}
+# plotting group and age effects even though no interaction to show that there is no interaction! 
+effect_df <- data.frame(effect("brain_age_yrs:GROUP", GMV_main))
+ 
+GMV_plot <- ggplot(data = effect_df, aes(x = brain_age_yrs, y = fit)) +
+  geom_line(aes(color = GROUP) ) + 
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = GROUP), alpha = 0.2) +
+  geom_point(data = fsdata6,aes(x = brain_age_yrs, y = GMV, color = GROUP), alpha = 0.2 ) + 
+  geom_line(data = fsdata6, aes(x = brain_age_yrs, y = GMV, 
+                                group = IDENT_SUBID, color = GROUP), alpha = 0.2) +
+  theme_classic() + ylab (" GMV") + xlab ("Age (years)") +
+  my_colors + my_colors2 
+GMV_plot
+
+ggsave(GMV_plot, file = "figures/GMV_by_age_and_group.pdf")
+```
+
+
+plotting scanner effect
+```{r}
+# plotting group and age effects even though no interaction to show that there is no interaction! 
+effect_df <- data.frame(effect("scanner_confound", GMV_main)) 
+ 
+motion_plot <- ggplot(data = effect_df, aes(x = scanner_confound, y = fit)) +
+  geom_point(color = "red", size = 2) + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.1) +
+  geom_jitter(data = fsdata6,
+             aes(x = scanner_confound, y = GMV), alpha = 0.2, width = 0.1) + 
+  theme_classic() + ylab ("GMV") + xlab ("Scanner") +
+  my_colors + my_colors2 
+motion_plot
+
+ggsave(motion_plot, file = "figures/GMV_by_scanner.pdf")
+```
+
+
+# Motion by group 
+when controlling for age, sex, scanner, aseg ratings 
+## main effect is a trend: PI < COMPS 
+```{r}
+
+motion_main <- lmer(motion_ave_new ~ brain_age_yrs + GROUP + sex + scanner_confound + 
+                   aseg_ave_rating + 
+                (1 | IDENT_SUBID), 
+              data = fsdata6)
+summary(motion_main)
+
+```
+
+## no group x age interaction on motion
+```{r}
+
+motion_int <- lmer(motion_ave_new ~ brain_age_yrs * GROUP + sex + scanner_confound + aseg_ave_rating +
+                (1 | IDENT_SUBID), 
+              data = fsdata6)
+summary(motion_int)
+```
+
+plotting effect
+```{r}
+# plotting group and age effects even though no interaction to show that there is no interaction! 
+effect_df <- data.frame(effect("brain_age_yrs:GROUP", motion_main))
+ 
+motion_plot <- ggplot(data = effect_df, aes(x = brain_age_yrs, y = fit)) +
+  geom_line(aes(color = GROUP) ) + 
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = GROUP), alpha = 0.2) +
+  geom_point(data = fsdata6,
+             aes(x = brain_age_yrs, y = motion_ave_new, color = GROUP), alpha = 0.2 ) + 
+  geom_line(data = fsdata6, aes(x = brain_age_yrs, y = motion_ave_new, 
+                                group = IDENT_SUBID, color = GROUP), alpha = 0.2) +
+  theme_classic() + ylab ("Average motion rating") + xlab ("Age (years)") +
+  my_colors + my_colors2 
+motion_plot
+
+ggsave(motion_plot, file = "figures/motion_by_age_and_group.pdf")
+```
+
+
+plotting scanner effect
+```{r}
+# plotting group and age effects even though no interaction to show that there is no interaction! 
+effect_df <- data.frame(effect("scanner_confound", motion_main)) 
+ 
+motion_plot <- ggplot(data = effect_df, aes(x = scanner_confound, y = fit)) +
+  geom_point(color = "red", size = 2) + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.1) +
+  geom_jitter(data = fsdata6,
+             aes(x = scanner_confound, y = motion_ave_new), alpha = 0.2, width = 0.1) + 
+  theme_classic() + ylab ("Average motion rating") + xlab ("Scanner") +
+  my_colors + my_colors2 
+motion_plot
+
+ggsave(motion_plot, file = "figures/motion_by_scanner.pdf")
+```
+
+## Segmentation quality by group 
+no relationship. 
+
+when controlling for age, sex, scanner, motion ratings 
+## main effect is NS
+```{r}
+
+aseg_main <- lmer(aseg_ave_rating ~ brain_age_yrs + GROUP + sex + scanner_confound + 
+                   motion_ave_new + 
+                (1 | IDENT_SUBID), 
+              data = fsdata6)
+summary(aseg_main)
+
+```
+
+plotting effect
+```{r}
+# plotting group and age effects even though no interaction to show that there is no interaction! 
+effect_df <- data.frame(effect("brain_age_yrs:GROUP", aseg_main))
+ 
+aseg_plot <- ggplot(data = effect_df, aes(x = brain_age_yrs, y = fit)) +
+  geom_line(aes(color = GROUP) ) + 
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = GROUP), alpha = 0.2) +
+  geom_point(data = fsdata6,
+             aes(x = brain_age_yrs, y = aseg_ave_rating, color = GROUP), alpha = 0.2 ) + 
+  geom_line(data = fsdata6, aes(x = brain_age_yrs, y = aseg_ave_rating, 
+                                group = IDENT_SUBID, color = GROUP), alpha = 0.2) +
+  theme_classic() + ylab ("Average Segmenntation Rating") + xlab ("Age (years)") +
+  my_colors + my_colors2 
+aseg_plot
+
+ggsave(aseg_plot, file = "figures/aseg_by_age_and_group.pdf")
+```
+
+
+
+
+plotting scanner effect
+```{r}
+# plotting group and age effects even though no interaction to show that there is no interaction! 
+effect_df <- data.frame(effect("scanner_confound", aseg_main)) 
+ 
+motion_plot <- ggplot(data = effect_df, aes(x = scanner_confound, y = fit)) +
+  #geom_point(color = "red", size = 2) + 
+  #geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.1) +
+  geom_boxplot(data = fsdata6,
+             aes(x = scanner_confound, y = aseg_ave_rating)) +
+  geom_jitter(data = fsdata6,
+             aes(x = scanner_confound, y = aseg_ave_rating), alpha = 0.2, width = 0.1) + 
+  theme_classic() + ylab ("Average Segmentation Rating") + xlab ("Scanner") +
+  my_colors + my_colors2 
+motion_plot
+
+ggsave(motion_plot, file = "figures/aseg_rating_by_scanner.pdf")
+```

@@ -1,0 +1,189 @@
+---
+title: "merging freesurfer output, QC data, and master datasets"
+author: "Michelle VanTieghem"
+date: "January 23, 2018"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# Readme:
+1) filter freesurfer data for only dev sample \
+2) add demographics \
+3) clean QC excel sheet \ 
+4) combine with freesurfer data \
+
+
+checked Jan 30, 2019
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+# load data 
+## raw freesurfer data
+```{r}
+fsdata <- read.csv("../../../data/2_fs_data/raw_data/v6_asegstats_all_compiled_Marta_02-01-2018.csv")
+nrow(fsdata)
+names(fsdata)[1] <- "SUBJECTID"
+# mark all of the waves for each row of data
+fsdata$WAVE <- ifelse(grepl("fu1", fsdata$SUBJECTID), "WAVE2", ifelse(grepl("fu2", fsdata$SUBJECTID), "WAVE3", "WAVE1"))
+
+# save this "long formatted" SUBJECTID 
+fsdata$SUBJECTID_long <- fsdata$SUBJECTID 
+
+# convert into a long datasest by removing "fu1" "fu2" on SUBIDS
+# ( only keep first 5 characters of subjectid)
+fsdata$SUBJECTID <- substr(fsdata$SUBJECTID_long, 1, 5)
+
+```
+
+## get master data with demographics 
+```{r, message = F}
+master <- read_csv("../../../data/master/J.Data_Entry_Master_8_17_2017_fixed_fixed.csv")
+
+# select demo variables we need 
+master$SUBJECTID <- as.character(master$IDENT_SUBID)
+sub <- master %>% 
+  dplyr::select("SUBJECTID","IDENT_SUBTYPE", "SUBAGE_Session1", "SUBAGE_session2", "SUBAGE_session3", "SUBAGE_session4", "DEM_3_GENDER_CHILD") %>%
+  rename(GROUP = IDENT_SUBTYPE)
+
+## convert into a long dataset by wave, repeating session AGE
+sub_long <- sub %>%
+  gather(Session, brain_age_mos, SUBAGE_session2:SUBAGE_session4) %>%
+  # make a long-version of this ID number. we will use this to merge with fsdata.
+  # note: session 2 = baseline scan 
+  # session 3 = scan at fu1 
+  # session 4 = scan at fu2 
+  mutate(SUBJECTID_long = ifelse(Session == "SUBAGE_session3", paste0(SUBJECTID, "_fu1"), ifelse(Session == "SUBAGE_session4", paste0(SUBJECTID, "_fu2"),SUBJECTID)))
+
+```
+
+## now, merge two long datasets by longID
+```{r}
+# use the long version of SUBJECTID, so that each wave is labeled as a row.
+df <- merge(fsdata, sub_long, by= "SUBJECTID_long")
+N_total_scans <- nrow(df) 
+
+# exclude  adults and preschoolers
+df_dev <- filter(df, GROUP != 3 & GROUP !=2)
+```
+
+## manually fix age for known error
+```{r, results = F}
+# one sscan has no AGE: SB019_fu2
+sum(is.na(df_dev$brain_age_mos))
+
+# fix SB019 ages manually.
+# ages labeled incorrectly in master:
+subSB019 <- sub %>%
+  filter(SUBJECTID == "SB019")
+subSB019 # these labels are supposed to be  SUBAGE session2  = first scan, SUBAGE session3 = fu1, SUBAGE session4 = fu2
+
+
+# for this subject, SUBAGE session 2 = fu1, SUBAGE session 3 = fu2 
+fsdata %>%
+  filter(SUBJECTID == "SB019") %>%
+  dplyr::select(SUBJECTID_long, SUBJECTID)
+
+# change the ages to correct times.
+df_dev$brain_age_mos[df_dev$SUBJECTID_long == "SB019_fu1"] <- subSB019$SUBAGE_session2
+df_dev$brain_age_mos[df_dev$SUBJECTID_long == "SB019_fu2"] <- subSB019$SUBAGE_session3
+
+# make age in years instead of months!
+df_dev$brain_age_yrs <- df_dev$brain_age_mos/12
+
+```
+
+## Now add ASEG Quality Control info
+excel sheet with motion and segmentation ratings 
+```{r}
+
+df.qc <- read_excel("../../../data/2_fs_data/raw_data/Freesurfer_Aseg_SB_organized_final_March30_2018.xlsx")
+nrow(df.qc)
+
+```
+
+## clean dataset 
+```{r}
+# removing extra row in header
+names(df.qc) <- df.qc[1,]
+df.qc <- df.qc[2:nrow(df.qc), ]
+
+
+## rename variables 
+# which motion was calculated by michelle, jasmin marta or liliana.
+names(df.qc)[1] <- "SUBJECTID_long"
+names(df.qc)[10] <- "motion_Michelle"
+names(df.qc)[11] <- "motion_Jasmin"
+names(df.qc)[12] <- "motion_Marta"
+names(df.qc)[13] <- "motion_average"
+names(df.qc)[14] <- "inclusion"
+names(df.qc)[15] <- "reason_exclude"
+names(df.qc)[16] <- "ASEG_rating_Marta"
+names(df.qc)[17] <- "GM_rating_Marta"
+names(df.qc)[21] <- "ASEG_rating_Liliana"
+names(df.qc)[22] <- "GM_rating_Liliana"
+
+# remove junk columns
+df.qc <- df.qc[,-c(2,3,4,5,6,7,8,9)]
+```
+
+## merge QC data and freesurfer volume data - wide format 
+```{r}
+nrow(df.qc) # 389 rows because several adult scans 
+nrow(df_dev) # 330 for dev sample
+
+# merrge them together
+fsdata <- merge(df.qc, df_dev, by = c("SUBJECTID_long"))
+nrow(fsdata) # 330 for dev sample
+ncol(fsdata) # does not include master dataset
+
+# check that subjectids are correctly formatted. 
+length(unique(fsdata$SUBJECTID_long)) # number of scans
+length(unique(fsdata$SUBJECTID.x)) # number of subjects
+
+# make a subid that doesn't have fu1 / fu2 added
+fsdata$IDENT_SUBID <- str_sub(fsdata$SUBJECTID_long, 1, 5)
+
+```
+
+## update wave variable (numbers 1,2,3) instead of fu1, fu2
+```{r}
+fsdata$index_wave <- as.factor(ifelse(grepl("fu1", fsdata$SUBJECTID_long), 2, 
+                            ifelse(grepl("fu2", fsdata$SUBJECTID_long), 3, 1)))
+summary(fsdata$index_wave)
+
+sum(is.na(fsdata$brain_age_yrs))
+```
+
+# final data frame
+## check age & gender distribution by wave and group
+```{r}
+Age_by_wave_table <- fsdata %>% 
+  group_by(GROUP, WAVE) %>%
+  dplyr::summarize (Nscans=n(), 
+             min_age_by_wave= min(brain_age_yrs, na.rm = TRUE),
+              max_age= max(brain_age_yrs,  na.rm = TRUE),
+             mean_age=mean(brain_age_yrs,  na.rm = TRUE),  
+             sd_age=sd(brain_age_yrs,  na.rm = TRUE), 
+             Ratio_female=mean(DEM_3_GENDER_CHILD))
+Age_by_wave_table
+
+```
+ 
+
+## save this data~
+```{r, include = F}
+
+save(fsdata, file = "../../../data/2_fs_data/1_all_freesurfer_v6_data_with_aseg_QC_info.RData")
+
+```
+
+

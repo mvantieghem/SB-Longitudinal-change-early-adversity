@@ -1,0 +1,615 @@
+---
+title: "QC check and removing outliers"
+author: "Michelle.VanTieghem"
+date: "July 5, 2018"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# README:
+same QC procedure as original analysis, for subset of data (6-19)
+1. get freesurferand aseg QC info together 
+2. calculate inter rater reliablity for motion and aseg ratings 
+3. get age distribution of all scans from comps + PIs
+4. filter based on scan quality
+5. once all excluded bad brains, check age-distribution and exclude too old/ too young comps.
+6. calculate outliers witin that final sample. 
+
+# final age filter
+6.0 minimum to 19.0 maximum 
+1 PI < 6 and 0 PIs > 19
+
+
+ 
+```{r, include = F, warnings =F, echo = F}
+source("../../0_R_analysis_setup_file.R")
+
+```
+
+
+# load data 
+- not filtered at all yet for brain_age_yrs or anything. 
+```{r, include = F}
+load("../../../data/2_fs_data/1_all_freesurfer_v6_data_with_aseg_QC_info.RData")
+nrow(fsdata) # not filtered at all yet! 
+```
+
+
+## keep only comps and PIs with brain data.
+```{r}
+
+fsdata <- subset(fsdata, !is.na(brain_age_yrs) &
+                       (GROUP == 1 | GROUP == 0))
+
+nrow(fsdata) # after filtering 
+```
+
+## Check whole brain volume measures 
+
+```{r,warnings=FALSE}
+fsdata$ICV <- fsdata$EstimatedTotalIntraCranialVol
+fsdata$GMV <- fsdata$TotalGrayVol
+# don't have whole brain volume from ASEG because no white matter estimates. .
+```
+
+
+# calculate metrics for QC
+## check motion metrics 
+```{r, warnings = F}
+
+motion_vars <- fsdata[grepl("motion", names(fsdata))]
+motion_vars <- motion_vars[,1:3 ]
+class(motion_vars$motion_Michelle)
+class(motion_vars$motion_Jasmin)
+
+motion_vars$motion_Jasmin.n <- as.numeric(substr(motion_vars$motion_Jasmin, 1, 1))
+motion_vars$motion_Marta.n <- as.numeric(substr(motion_vars$motion_Marta, 1, 1))
+motion_vars$motion_Michelle.n <-as.numeric(substr(motion_vars$motion_Michelle, 1, 1))
+
+range(motion_vars$motion_Jasmin.n, na.rm = T)
+range(motion_vars$motion_Marta.n, na.rm = T)
+range(motion_vars$motion_Michelle.n, na.rm = T)
+
+# fix this one... 
+#motion_vars$motion_Marta.n <- ifelse(motion_vars$motion_Marta.n == 34, 3.5, #as.numeric((motion_vars$motion_Marta.n)))
+
+# now get the means and add to df
+motion_vars.m <- as.matrix(motion_vars[,4:6])
+fsdata$motion_ave_new <- rowMeans(motion_vars.m, na.rm = TRUE)
+hist(fsdata$motion_ave_new)
+
+```
+
+## check motion rater reliability - excellent! 
+```{r, warnings = F}
+# correlation 
+corr_motion <- with(motion_vars, cor.test(motion_Marta.n, motion_Michelle.n))
+interclass_coef <- corr_motion[4]
+# Intra-class correlatin
+# http://personality-project.org/r/html/ICC.html
+#library(psych)
+#ICC(motion_vars.m)
+
+# how many overlap (have 2 ratings)
+N_both_MM_raters <- with(motion_vars, sum(ifelse(!is.na(motion_Marta.n) & 
+                              !is.na(motion_Michelle.n), 1, 0), na.rm = T))
+# all brains rated by both raters except for 1! 
+N_both_MM_raters
+
+# calculate percent raters agreement
+N_motion_MM_raters_agree <- sum(with(motion_vars, ifelse(motion_Marta.n == motion_Michelle.n, 1, 0)), na.rm = TRUE)
+
+# only agree 56% of the time... 
+Motion_MM_inter_rater_reliability <- N_motion_MM_raters_agree/ N_both_MM_raters
+
+####
+# how many overlap (have 2 ratings)
+N_both_MJ_raters <- with(motion_vars, sum(ifelse(!is.na(motion_Marta.n) & 
+                              !is.na(motion_Jasmin.n), 1, 0), na.rm = T))
+# all brains rated by both raters except for 1! 
+N_both_MJ_raters
+
+# calculate percent raters agreement
+N_motion_MJ_raters_agree <- sum(with(motion_vars, ifelse(motion_Marta.n == motion_Jasmin.n, 1, 0)), na.rm = TRUE)
+
+# only agree 57% of the time... 
+Motion_MJ_inter_rater_reliability <- N_motion_MJ_raters_agree/ N_both_MJ_raters
+
+
+```
+
+
+
+## check aseg metrics 
+```{r, warnings = F}
+## check aseg metrics 
+aseg_vars <- fsdata[grepl("ASEG", names(fsdata))]
+names(aseg_vars)
+aseg_vars <- cbind(aseg_vars[1], aseg_vars[3])
+class(aseg_vars$ASEG_rating_Marta)
+class(aseg_vars$ASEG_rating_Liliana)
+
+aseg_vars$ASEG_rating_Liliana.n <- as.numeric(substr(aseg_vars$ASEG_rating_Liliana, 1, 1))
+aseg_vars$ASEG_rating_Marta.n <- as.numeric(substr(aseg_vars$ASEG_rating_Marta, 1, 1))
+
+head(aseg_vars$ASEG_rating_Liliana.n)
+range(aseg_vars$ASEG_rating_Marta.n, na.rm = T)
+range(aseg_vars$ASEG_rating_Liliana.n, na.rm = T)
+## calculate averbrain_age_yrs aseg rating 
+aseg_vars.m <- as.matrix(aseg_vars[,3:4])
+fsdata$aseg_ave_rating <- rowMeans(aseg_vars.m, na.rm = TRUE)
+hist(fsdata$aseg_ave_rating)
+
+```
+
+## check ASEG rater reliability - excellent! 
+note this is only within the included subjects. 
+```{r, warnings = F}
+# correlation 
+corr_aseg <- with(aseg_vars, cor.test(ASEG_rating_Marta.n, ASEG_rating_Liliana.n))
+interclass_coef <- corr_aseg[4]
+
+# intraclass correlation
+#ICC(aseg_vars.m)
+
+# how many overlap (have 2 ratings)
+N_both_raters_aseg <- with(aseg_vars, sum(ifelse(!is.na(ASEG_rating_Marta.n) & 
+                              !is.na(ASEG_rating_Liliana.n), 1, 0), na.rm = T))
+# all brains rated by both raters except for 1! 
+
+
+# calculate percent raters agreement
+N_aseg_raters_agree <- sum(with(aseg_vars, ifelse(ASEG_rating_Liliana.n == ASEG_rating_Marta.n, 1, 0)), na.rm = TRUE)
+
+# 82 % rater reliablity. 
+ASEG_inter_rater_reliability <- N_aseg_raters_agree/ N_both_raters_aseg
+
+
+table_motion_info <- rbind(N_both_MM_raters, N_motion_MM_raters_agree, Motion_MM_inter_rater_reliability, 
+                           N_both_MJ_raters, N_motion_MJ_raters_agree, Motion_MJ_inter_rater_reliability, 
+                           N_both_raters_aseg, N_aseg_raters_agree, ASEG_inter_rater_reliability)
+
+save(table_motion_info, file = "tables/Interrater_reliability_freesurfer_QC_assess.Rdata")
+```
+
+
+
+## exclude subjets with no brain data & check whether all brains have motion assessment 
+```{r, warnings = F}
+fsdata$brain_check <- as.factor(with(fsdata, 
+                               ifelse(is.na(TotalGrayVol) & !is.na(motion_ave_new), 
+                                      "missing_volume", 
+                                ifelse(!is.na(TotalGrayVol) & is.na(motion_ave_new), 
+                                       "missing_motion", 
+                                       ifelse(is.na(TotalGrayVol) & is.na(motion_ave_new), 
+                                              "no_brain_data","good")))))
+summary(fsdata$brain_check)
+
+missing_motion_index <- which(fsdata$brain_check == "missing_motion")
+missing_motion <- subset(fsdata, brain_check == "missing_motion")
+missing_motion$SUBJECTID_long
+# SB066 should be excluded
+
+fsdata1 <- subset(fsdata, brain_check != "missing_motion")
+
+N_all_COMP_scans <- summary(fsdata1$GROUP)[1]
+N_all_PI_scans <- summary(fsdata1$GROUP)[2]
+
+```
+
+# Get sample info on all scanned subjects 
+## Add group info 
+```{r}
+
+fsdata1$GROUP <- as.factor(ifelse(fsdata1$GROUP == 1, "PI", "COMP"))
+summary(fsdata1$GROUP)
+fsdata1$sex <- fsdata1$DEM_3_GENDER_CHILD
+summary(as.factor(fsdata1$sex))
+```
+
+
+## find out how many young PIS vs. comps 
+for all subjects - before excluding anyone!! 
+```{r}
+
+fsdata1$brain_age_yrs_bin <- as.factor(ifelse(fsdata1$brain_age_yrs < 7,"4-6.9", ifelse(fsdata1$brain_age_yrs < 10, "7-9.9", 
+                          ifelse(fsdata1$brain_age_yrs < 13,"10-12.9", ifelse(fsdata1$brain_age_yrs < 16, "13-15.9", 
+                                                                    ifelse( fsdata1$brain_age_yrs >= 16, "16-20", "help"))))))
+
+fsdata1$brain_age_yrs_bin <- factor(fsdata1$brain_age_yrs_bin, levels = c("4-6.9", "7-9.9", "10-12.9", "13-15.9", "16-20"))
+fsdata1$brain_age_yrs_Factor <- as.factor(trunc(fsdata1$brain_age_yrs))
+
+brain_age_yrs_bin_groups <- fsdata1 %>%
+  group_by(GROUP, brain_age_yrs_bin) %>%
+  dplyr::summarize(n = n(),
+            mean_brain_age_yrs= mean(brain_age_yrs),
+            min_brain_age_yrs = min(brain_age_yrs),
+            max_brain_age_yrs = max(brain_age_yrs))
+
+brain_age_yrs_bin_groups
+```
+
+## plot group bins
+```{r}
+brain_age_yrs_bin_groups <- fsdata1 %>%
+  group_by(GROUP, brain_age_yrs_Factor) %>%
+  dplyr::summarize(n = n(),
+            mean_brain_age_yrs= mean(brain_age_yrs), 
+            max_brain_age_yrs = max(brain_age_yrs),
+            min_brain_age_yrs = min(brain_age_yrs))
+
+
+ggplot(brain_age_yrs_bin_groups, aes(x = brain_age_yrs_Factor, y = n, fill = GROUP)) +
+  geom_bar(stat = "identity") + theme_classic() + ylab("N subjects")
+
+```
+
+## get min brain_age_yrs for reference later
+```{r}
+fsdata1$index_wave <- as.numeric(as.character(fsdata1$index_wave))
+fsdata1$GROUP.n <- as.numeric(as.character(fsdata1$GROUP))
+sum(is.na(fsdata1$SUBJECTID.y))
+fsdata1$IDENT_SUBID<- fsdata1$SUBJECTID.y
+
+# get min brain_age_yrs for each subject. 
+getinfo <- fsdata1 %>%
+  group_by(IDENT_SUBID) %>%
+  dplyr::summarize(GROUP = mean(GROUP.n),
+            sex = mean(sex),
+            first_visit = min(index_wave), 
+            last_visit=max(index_wave), 
+            max_brain_age_yrs = max(brain_age_yrs),
+            min_brain_age_yrs = min(brain_age_yrs))
+
+
+#now get info for each subject included in dataset.
+Indiv_subject_table <- getinfo %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(N= n(),
+            mean_min_brain_age_yrs = mean(min_brain_age_yrs),  
+            proportion_female = mean(sex))
+
+
+
+# now add this info to the long-dataset for future reference! 
+for (i in 1:nrow(fsdata1)){
+  sub <- fsdata1$IDENT_SUBID[i]
+  fsdata1$first_visit[i] <- getinfo$first_visit[getinfo$IDENT_SUBID == sub]
+  fsdata1$last_visit[i] <- getinfo$last_visit[getinfo$IDENT_SUBID == sub]
+  fsdata1$min_brain_age_yrs[i] <- getinfo$min_brain_age_yrs[getinfo$IDENT_SUBID== sub]
+  fsdata1$max_brain_age_yrs[i] <- getinfo$max_brain_age_yrs[getinfo$IDENT_SUBID== sub]
+}
+```
+
+# Exclude subjects based on QC metrics
+## exclude subjects with motion ratings > 3
+```{r, warnings = F}
+nrow(fsdata1)
+# first get data on who they are
+
+
+fsdata1$exclude_fs_motion <- ifelse(fsdata1$motion_ave_new > 3, 1, 0)
+N_excluded_motion <- sum(fsdata1$exclude_fs_motion, na.rm = T)
+N_excluded_motion_PI <-  sum(fsdata1$exclude_fs_motion[fsdata1$GROUP == "PI"], na.rm = T)
+N_excluded_motion_COMP <-  sum(fsdata1$exclude_fs_motion[fsdata1$GROUP == "COMP"], na.rm = T)
+
+
+# not excluding ANY PIs < 6 years old here! 
+fsdata1 %>% group_by(GROUP, exclude_fs_motion) %>%
+  dplyr::summarize(n = n(), 
+            mean_brain_age_yrs = mean(brain_age_yrs), 
+            max_brain_age_yrs = max(brain_age_yrs),
+            min_brain_age_yrs = min(brain_age_yrs))
+
+                          
+# exclude subjects marked 1 
+fsdata2 <- subset(fsdata1, exclude_fs_motion == 0 | is.na(exclude_fs_motion))
+N_brain_data_pts_usable_motion <- nrow(fsdata2)
+
+```
+
+
+## exclude others marked "exclude" (from freesurer proc MVT) if any 
+```{r, warnings = F}
+# we forgot to mark SB001_fu1 as exclude - data is corrupted
+fsdata2$inclusion[fsdata2$SUBJECTID_long == "SB001_fu1"] <- "EXCLUDE"
+
+
+summary(as.factor(fsdata2$inclusion))
+# mark those 4 subjects and exclude them.
+fsdata2$exclude_fs_other <- ifelse(fsdata2$inclusion == "EXCLUDE", 1, 0)
+
+N_excluded_other <- sum(fsdata2$exclude_fs_other)
+N_excluded_other_PI <- sum(fsdata2$exclude_fs_other[fsdata2$GROUP == "PI"])
+N_excluded_other_COMP <- sum(fsdata2$exclude_fs_other[fsdata2$GROUP == "COMP"])
+
+# get info on these subjects 
+# not excluding ANY PIs < 6 years old here! 
+fsdata2 %>% group_by(GROUP, exclude_fs_other) %>%
+  dplyr::summarize(n = n(), 
+            mean_brain_age_yrs = mean(brain_age_yrs), 
+            max_brain_age_yrs = max(brain_age_yrs),
+            min_brain_age_yrs = min(brain_age_yrs))
+
+# now exclude subjects marked. 
+fsdata3 <- subset(fsdata2, inclusion != "EXCLUDE")
+nrow(fsdata3)
+```
+
+## of the brains remaining, how many have bad aseg rating ? 
+```{r, warnings = F}
+# 4 subjects with scores greater than 3.
+fsdata3$excluded_aseg <-  ifelse(fsdata3$aseg_ave_rating > 3, 1,0)
+N_excluded_aseg_PI <- sum(fsdata3$excluded_aseg[fsdata3$GROUP == "PI"], na.rm = TRUE)
+N_excluded_aseg_COMP <- sum(fsdata3$excluded_aseg[fsdata3$GROUP == "COMP"], na.rm = TRUE)
+
+# keep subjects with rating of 3 or lower. 
+fsdata4 <- subset(fsdata3, aseg_ave_rating <= 3)
+nrow(fsdata4)
+
+```
+
+## make average amyg and hipp vars 
+```{r}
+
+fsdata4$Amyg_ave <- (fsdata4$Left.Amygdala + fsdata4$Right.Amygdala) / 2 
+fsdata4$Hipp_ave <- (fsdata4$Left.Hippocampus + fsdata4$Right.Hippocampus) / 2 
+#Left.Hippocampus
+fsdata4$Amyg_ratio_ICV <- fsdata4$Amyg_ave / fsdata4$ICV
+fsdata4$Amyg_ratio_GMV <- fsdata4$Amyg_ave / fsdata4$GMV
+```
+
+
+## check brain_age_yrs distributions of the entire sample ...
+```{r}
+
+fsdata4$brain_age_yrs_bin <- as.factor(ifelse(fsdata4$brain_age_yrs < 7,"4-6.9", ifelse(fsdata4$brain_age_yrs < 10, "7-9.9", 
+                          ifelse(fsdata4$brain_age_yrs < 13,"10-12.9", ifelse(fsdata4$brain_age_yrs < 16, "13-15.9", 
+                                                                    ifelse( fsdata4$brain_age_yrs < 19, "16-19", "older 19"))))))
+
+fsdata4$brain_age_yrs_bin <- factor(fsdata4$brain_age_yrs_bin, levels = c("4-6.9", "7-9.9", "10-12.9", "13-15.9", "16-19", "older 19"))
+
+fsdata4$brain_age_yrs_Factor <- as.factor(trunc(fsdata4$brain_age_yrs))
+brain_age_yrs_bin_groups <- fsdata4 %>%
+  group_by(GROUP,brain_age_yrs_bin) %>%
+  dplyr::summarize(n = n(),
+            mean_brain_age_yrs= mean(brain_age_yrs), 
+            max_brain_age_yrs = max(brain_age_yrs),
+            min_brain_age_yrs = min(brain_age_yrs))
+
+brain_age_yrs_bin_groups
+
+```
+
+
+
+
+### excluding bottom of brain_age_yrs-distribution in order to even-out distribution between groups 
+ want at least 3 per group at the brain_age_yrs-extremes. 
+```{r}
+fsdata5 <- subset(fsdata4, brain_age_yrs >= 6 & brain_age_yrs <= 19) 
+excluded_for_age_PI <- subset(fsdata4, (brain_age_yrs < 6 | brain_age_yrs > 19) & GROUP == "PI") 
+N_excluded_brain_age_yrs_PI <- nrow(excluded_for_age_PI)
+
+excluded_for_age_COMP <- subset(fsdata4, (brain_age_yrs < 6 | brain_age_yrs > 19 ) & GROUP == "COMP") 
+N_excluded_brain_age_yrs_COMP <- nrow(excluded_for_age_COMP)
+
+
+N_sample_pre_outliers <- nrow(fsdata5)
+```
+
+
+
+## plot the new  brain_age_yrs distribution 
+still very uneven! 
+```{r}
+brain_age_yrs_bin_groups <- fsdata5 %>%
+  group_by(GROUP, brain_age_yrs_Factor) %>%
+  dplyr::summarize(n = n(),
+            mean_brain_age_yrs= mean(brain_age_yrs), 
+            max_brain_age_yrs = max(brain_age_yrs),
+            min_brain_age_yrs = min(brain_age_yrs))
+
+
+ggplot(brain_age_yrs_bin_groups, aes(x = brain_age_yrs_Factor, y = n, fill = GROUP)) +
+  geom_bar(stat = "identity") + theme_classic() + ylab("N subjects")
+```
+
+
+# now check for outliers by TP and group. 
+note: outliers by wave were already excluded, but this is a subsample... 
+```{r}
+
+fsdata5 <- fsdata5[
+  with(fsdata5, order(GROUP, index_wave)),
+]
+
+# select variables you want outliers for
+var_list <- fsdata5 %>% dplyr::select(Amyg_ave, Hipp_ave, ICV, GMV)
+var_list <- names(var_list)
+# make an empty dataframe to store new stuff into 
+outlier_list <- NA
+# run through loop of each variable 
+for (var in var_list){
+    print (var)
+  # use dplyr magic to get all of the info you need.
+  outlier_groups <- fsdata4 %>% 
+    # group by GROUP and TIMEPOINT.
+      dplyr::select (var, GROUP, index_wave) %>% 
+         group_by(GROUP, index_wave) %>% # sort data by group and tp 
+         summarize_all(funs(mean(., na.rm = T), sd(., na.rm = T)))         
+    # get the means, SD, upper and lower limit (3 SD above or below mean) for 
+   outlier_groups$upper <- outlier_groups$mean + 3*outlier_groups$sd 
+   outlier_groups$lower <-  outlier_groups$mean - 3*outlier_groups$sd 
+   
+   # restart these here, because they will generated anew for each variable.
+
+    outlier_list <- data.frame()
+# for each grouping in outlier_groups, find outliers and mark them. 
+for (i in 1:nrow(outlier_groups)){
+  print(i)
+  # which group is this? PI or comp
+  group <- outlier_groups$GROUP[i]
+  tp <- outlier_groups$index_wave[i]
+  # set the max and minimum values of cortisol that we will use as outlier threshold
+  lower_limits <- outlier_groups$lower[i]
+  upper_limits <- outlier_groups$upper[i]
+  # get all of the original data by group & wave
+  data_chunk <- subset(fsdata5,  GROUP== group & index_wave == tp)
+ # make sure you're only calculating outliers for the correct variable 
+  variable <- data_chunk %>% dplyr::select(var)
+   # mark the outliers as 1
+  mark_outliers <- data.frame(ifelse(variable[1] >= upper_limits
+                          | variable <= lower_limits, 1, 0))
+   # make sure this name matches the variable name (e.g. L hipp)
+  names(mark_outliers) <- paste0(var, "_outliers")
+  # save the outlier 1s and 0s into a new column 
+  outlier_list <- rbind(outlier_list, mark_outliers)
+  # make sure the column name matches the variable name (e.g. L hipp)
+  names(outlier_list) <- paste0(var, "_outliers")
+} 
+  print ("loop break")
+  # add the new column of outliers for each variable (e.g. L hipp) to the orig dataframe. 
+   fsdata5 <- cbind(fsdata5, outlier_list) 
+   
+}
+```
+
+## count outliers by group and wave
+```{r}
+  
+# use dplyr magic to get all of the info you need.
+sample_outlier_table <- fsdata5 %>%    
+  
+         group_by(GROUP, index_wave) %>% # sort data by group and wave 
+         dplyr::summarize(N= n(), 
+                   Mean_amyg = mean(Amyg_ave), 
+                   SD_amyg=sd(Amyg_ave),
+           amyg_outliers = sum(Amyg_ave_outliers),
+             Mean_hipp = mean(Hipp_ave), 
+                   SD_hipp =sd(Hipp_ave),
+           hipp_outliers = sum(Hipp_ave_outliers))
+
+
+sample_outlier_table
+
+save(sample_outlier_table, file = "tables/outliers_fsdata_growthchart_ages_6_19.Rdata")
+```
+
+
+
+
+## remove outliers from dataset 
+```{r, warnings = F}
+fsdata5$gender <- with(fsdata5, as.factor(ifelse(sex == 0, "Male", "Female")))
+
+fsdata6 <- subset(fsdata5, Amyg_ave_outliers !=1 
+                     & Hipp_ave_outliers != 1 & ICV_outliers != 1)
+nrow(fsdata5)
+nrow(fsdata6) # final sample
+
+```
+
+# final sample
+
+## make table of all excluded subjects and reasons 
+```{r}
+
+
+N_PI_final <- summary(fsdata6$GROUP)[2]
+N_COMP_final <- summary(fsdata6$GROUP)[1]
+
+N_amyg_outliers_PI <- sum(fsdata5$Amyg_ave_outliers[fsdata5$GROUP == "PI"])
+N_amyg_outliers_COMP <- sum(fsdata5$Amyg_ave_outliers[fsdata5$GROUP == "COMP"])
+
+N_hipp_outliers_PI <- sum(fsdata5$Hipp_ave_outliers[fsdata5$GROUP == "PI"])
+N_hipp_outliers_COMP <- sum(fsdata5$Hipp_ave_outliers[fsdata5$GROUP == "COMP"])
+
+PI_excluded_scans <- rbind(N_all_PI_scans,N_excluded_motion_PI,N_excluded_other_PI, N_excluded_aseg_PI, N_excluded_brain_age_yrs_PI, N_PI_final) 
+COMP_excluded_scans <- rbind(N_all_COMP_scans,N_excluded_motion_COMP,N_excluded_other_COMP, N_excluded_aseg_COMP, N_excluded_brain_age_yrs_COMP, N_COMP_final) 
+                    
+exclusion_table_fsdata_growthchart_ages_6_19 <- cbind(PI_excluded_scans, COMP_excluded_scans)
+
+rownames(exclusion_table_fsdata_growthchart_ages_6_19 ) <- c("all scans", 
+                                                             "excluded_motion","excluded_other", 
+                                                             "excluded_aseg", "excluded_age", "final N scans")
+
+save(exclusion_table_fsdata_growthchart_ages_6_19, file = "tables/exclusion_table_fsdata_growthchart_ages_6_19.Rdata")
+```
+
+## get demographics ! 
+```{r}
+
+table <- fsdata6 %>%
+  group_by(GROUP, index_wave) %>%
+  dplyr::summarize(N= n(), 
+            mean_brain_age_yrs = mean(brain_age_yrs), 
+            sd_brain_age_yrs = sd(brain_age_yrs),
+            min_brain_age_yrs = min(brain_age_yrs), 
+            max_brain_age_yrs = max(brain_age_yrs), 
+            proportion_female = mean(sex))
+
+table
+
+save(table, file = "tables/demographics_fsdata_growthchart_ages_6_19.Rdata")
+
+```
+
+
+# age graph for final sample
+
+## plot age across waves for each group 
+```{r}
+# get min age for each subject. 
+min_age <- fsdata6 %>%
+  group_by(IDENT_SUBID) %>%
+  dplyr::summarize(min_age = min(brain_age_yrs))
+for (i in 1:nrow(fsdata6)){
+  sub <-fsdata6$IDENT_SUBID[i]
+  fsdata6$min_age[i] <- min_age$min_age[min_age$IDENT_SUBID== sub]
+}
+
+#hist(as.numeric(cort_merge7.no.outliers$min_age))
+```
+
+```{r}
+
+my_colors <-  scale_color_manual(values=c("#0006CC", "#CC0000"))
+my_colors2 <- scale_fill_manual(values=c("#0006CC", "#CC0000")) 
+AgebyParticipant_Brain <-ggplot(fsdata6,
+                         aes(colour=GROUP,
+                             y=fct_reorder(IDENT_SUBID, min_age), x=brain_age_yrs))+
+  geom_line(aes(group = IDENT_SUBID), size=.7, alpha = 0.7) + 
+  ylab("Participants") + xlab("Age") +
+  geom_point(size=1,  alpha = 0.7) + xlim(3, 20) +
+  theme_classic() + my_colors + facet_grid (~ GROUP) +
+  theme(axis.line = element_line(colour = "black"),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position="none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) + 
+   scale_x_continuous(breaks = seq(6,19, by = 3), limits=c(6, 19)) 
+
+
+pdf(file = "figures/Manuscript_Figure2_AgebyParticipant_brain_6to19.pdf", width = 6, height =4)
+AgebyParticipant_Brain
+dev.off()
+
+AgebyParticipant_Brain
+```
+
+
+# save data
+```{r}
+save(fsdata6, file="../../../data/2_fs_data/3_cleaned_fsdata_for_growth_chart_brain_age_yrs6_19.Rdata")
+```

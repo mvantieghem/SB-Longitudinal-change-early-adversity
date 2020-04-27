@@ -1,0 +1,1311 @@
+---
+title: "Supplemental analyses for amygdala volume"
+author: "Michelle.VanTieghem"
+date: "May 12, 2019"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# README:
+Supplemental analysis for right / left hemispheres, age of adoption, PDS and testos
+
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+
+```
+
+
+```{r, include = F, echo = F}
+
+######### lmer Version #######
+condslope.lmer.slopes <- function(x, z, c, y){
+#  condslope.lmer( "age1","GROUP", 0, Amyg_piecewise_orig)
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work. 
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+zx <- paste(z, x, sep = ":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[xz]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+coef4.var <- subset(modtidy, rownames == xz)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, xz])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 2), w1.slope=round(w1.slope, digits = 2),
+            df = subset(modtidy, rownames == x)$df,
+            t.val = round(t.val, digits = 2), p.val = round(p.val, digits = 3), 
+            lower95 = round(lower95, digits = 2), 
+            upper95 = round(upper95, digits = 2)))
+}
+
+
+condslope.lmer.pointestimates <- function(x, z, c, y){
+#  condslope.lmer( "age1","GROUP", 0, Amyg_piecewise_orig)
+  # x = name of x variable
+  # z = name of z variable (moderator)
+  # c = conditional value of z
+  # y = reg object
+  # lmer model must be in this order x + z + x*z
+# updated slightly by MVT on March 4, 2019 
+# bcause tidy doesn't work. 
+out <- summary(y)
+xz <- paste(x, z, sep=":")
+w0.intercept <- fixef(y)["(Intercept)"] + fixef(y)[z]*c
+w1.slope <- fixef(y)[x] + fixef(y)[xz]*c 
+#y.cond <- w0.intercept + w1.slope*xvalue
+require(broom)
+modtidy <- data.frame(summary(y)$coef)
+modtidy$rownames <- rownames(modtidy)
+coef2.var <- subset(modtidy, rownames == x)$Std..Error^2
+
+coef4.var <- subset(modtidy, rownames == xz)$Std..Error^2
+out.vcov <- vcov(y)
+cond.se <- sqrt(coef2.var + (c) * (c) * coef4.var + 2 * (c) * out.vcov[x, xz])
+t.val <- w1.slope/cond.se
+p.val <- 2*(1-pt(abs(t.val), subset(modtidy, rownames == x)$df, lower.tail=T))
+lower95 <- w1.slope-qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+upper95 <- w1.slope+qt(0.975, subset(modtidy, rownames == x)$df)*cond.se
+# z.out <- z.test(w1.slope, sigma.x= cond.se)
+return(list(w0.intercept=round(w0.intercept, digits = 2), w1.slope=round(w1.slope, digits = 2),
+            df = subset(modtidy, rownames == x)$df,
+            t.val = round(t.val, digits = 2), p.val = round(p.val, digits = 3), 
+            lower95 = round(lower95, digits = 2), 
+            upper95 = round(upper95, digits = 2)))
+}
+
+
+```
+
+# load data 
+check scanner confound variable
+
+```{r}
+load("../../../data/2_fs_data/3_cleaned_fsdata_for_growth_chart_brain_age_yrs4_19.Rdata")
+
+fsdata6$scanner_confound <-with(fsdata6, ifelse(index_wave == 3, 1, 0))
+```
+
+
+## rescale variables 
+for coefficients to be interpretable
+```{r}
+
+fsdata6$Amyg_ave <- fsdata6$Amyg_ave/100
+# NOTE: ICV NEEDS TO BE RESCALED FOR SIMILAR SD RANGE AND INTERPRETABLE COEFFICIENTS
+fsdata6$ICV <- fsdata6$ICV/100000
+
+hist(fsdata6$Amyg_ave)
+
+```
+
+## mean center stuff
+
+```{r}
+fsdata6$brain_age_yrs.c <- fsdata6$brain_age_yrs - mean(fsdata6$brain_age_yrs)
+fsdata6$sex.c <- fsdata6$sex - mean(fsdata6$sex)
+# main effect of age =squared 
+fsdata6$age_squared <- fsdata6$brain_age_yrs^2
+fsdata6$age_squared.c <- fsdata6$age_squared - mean(fsdata6$age_squared)
+fsdata6$ICV.c <- fsdata6$ICV - mean(fsdata6$ICV)
+fsdata6$meds.c <- fsdata6$ICV - mean(fsdata6$ICV)
+fsdata6$motion_ave_new.c  <- fsdata6$motion_ave_new - mean(fsdata6$motion_ave_new)
+fsdata6$scanner_confound.c <- fsdata6$scanner_confound - mean(fsdata6$scanner_confound)
+fsdata6$Right.Amygdala <- fsdata6$Right.Amygdala / 100
+fsdata6$Left.Amygdala <- fsdata6$Left.Amygdala / 100
+
+```
+
+
+# 1)  check retention stats 
+## prep data 
+```{r, warning = F, message = F}
+# get everyone's baseline info 
+baseline_demo <- fsdata6 %>% 
+    filter(brain_age_yrs == min_age) %>%
+   select(IDENT_SUBID, GROUP, brain_age_yrs, sex)
+nrow(baseline_demo)
+
+# get number f waves per subject
+follow_up_waves <- fsdata6 %>%
+  group_by(IDENT_SUBID, index_wave) %>%
+# first just find out who has cort for a given wave
+  dplyr::summarize(brain_exists = mean(Amyg_ave, na.rm = T)) %>%
+  # then make a wide df so we have each wave of cort as a column, 
+  spread(index_wave, brain_exists) %>%
+  rename(wave1 = '1', wave2 = '2', wave3 = '3') %>%
+  mutate(wave1 = ifelse(!is.na(wave1), 1, 0), 
+         wave2 = ifelse(!is.na(wave2), 1, 0), 
+         wave3 = ifelse(!is.na(wave3), 1, 0)) %>%
+  # now add counts of how many waves each subject has 
+  mutate(total_waves = as.factor((wave1 + wave2 + wave3)))
+
+# check that therer is a single row per subj
+identical(nrow(follow_up_waves), length(unique(follow_up_waves$IDENT_SUBID)))
+
+# this provides N for subs with 1,2,3 waves.
+summary(as.factor(follow_up_waves$total_waves))
+
+# combine with baseline demo
+retention_Df <- merge(baseline_demo, follow_up_waves, by = "IDENT_SUBID") %>%
+  mutate(GROUP = ifelse(GROUP == "PI", 1, 0))
+
+summary(retention_Df$GROUP)
+```
+
+## ANOVA to test difference in retention cohorts between baseline-only, 2 waves, 3 waves 
+
+```{r}
+library(car)
+# testing age differernce
+summary(age_test <- lm(brain_age_yrs ~ total_waves, data = retention_Df))
+Anova_age_test <- data.frame(Anova(age_test, type = "III"))
+
+# testing sex difference
+summary(sex_test <- glm (sex ~ total_waves, 
+                         family = binomial, 
+                         data = retention_Df))
+Anova_sex_test <- data.frame(Anova(sex_test, type = "III"))
+
+# trend difference...
+summary(group_test <- glm(GROUP ~ total_waves, 
+                  family = binomial, 
+                  data = retention_Df))
+Anova_group_test <- data.frame(Anova(group_test, type = "III"))
+
+save(Anova_group_test, Anova_sex_test, Anova_age_test, file = "model_output/Retention_Anova_tests.Rda")
+
+```
+
+## T-test for baseline-only vs. follow-up 
+```{r}
+retention_Df$one_vs_more_waves <- as.factor(ifelse(retention_Df$total_waves == 1, 1, 2))
+summary(retention_Df$one_vs_more_waves)
+
+summary(age_test <- lm(brain_age_yrs ~ one_vs_more_waves, data = retention_Df))
+
+
+# testing sex difference
+summary(sex_test <- lm (sex ~ one_vs_more_waves, data = retention_Df))
+
+
+summary(group_test <- glm(GROUP ~ one_vs_more_waves, 
+                  family = binomial, 
+                  data = retention_Df))
+
+# no group difference for brain retention, just CORT. 
+effect_df <- data.frame(effect("one_vs_more_waves", group_test))
+ggplot(effect_df, aes(x = one_vs_more_waves, y = fit)) +
+  geom_bar(stat = "identity", alpha = 0.5) + ylim(0,1) + ylab("GROUP") + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.5)
+```
+
+# 2) Right hemisphere alone 
+
+## prep for hemisphere testing separately 
+remove outliers for left & right amyg 
+
+```{r, echo = F}
+#fsdata6 <- fsdata6 %>%
+ # mutate(Right.Amyg.Cleaned = ifelse(Right.Amygdala > 3*sd(Right.Amygdala) + mean(Right.Amygdala), NA, Right.Amygdala),
+  #       Left.Amyg.Cleaned = ifelse(Left.Amygdala > 3*sd(Left.Amygdala) + mean(Left.Amygdala), NA, Left.Amygdala))
+
+fsdata6 <- fsdata6[
+  with(fsdata6, order(GROUP, index_wave)),
+]
+
+# select variables you want outliers for
+var_list <- fsdata6 %>% dplyr::select(Right.Amygdala, Left.Amygdala)
+var_list <- names(var_list)
+# make an empty dataframe to store new stuff into 
+outlier_list <- NA
+# run through loop of each variable 
+for (var in var_list){
+    print (var)
+  # use dplyr magic to get all of the info you need.
+  outlier_groups <- fsdata6 %>% 
+    # group by GROUP and TIMEPOINT.
+      dplyr::select (var, GROUP, index_wave) %>% 
+         group_by(GROUP, index_wave) %>% # sort data by group and tp 
+         summarize_all(funs(mean(., na.rm = T), sd(., na.rm = T)))         
+    # get the means, SD, upper and lower limit (3 SD above or below mean) for 
+   outlier_groups$upper <- outlier_groups$mean + 3*outlier_groups$sd 
+   outlier_groups$lower <-  outlier_groups$mean - 3*outlier_groups$sd 
+   
+   # restart these here, because they will generated anew for each variable.
+
+    outlier_list <- data.frame()
+# for each grouping in outlier_groups, find outliers and mark them. 
+for (i in 1:nrow(outlier_groups)){
+ # print(i)
+  # which group is this? PI or comp
+  group <- outlier_groups$GROUP[i]
+  tp <- outlier_groups$index_wave[i]
+  # set the max and minimum values of cortisol that we will use as outlier threshold
+  lower_limits <- outlier_groups$lower[i]
+  upper_limits <- outlier_groups$upper[i]
+  # get all of the original data by group & wave
+  data_chunk <- subset(fsdata6,  GROUP== group & index_wave == tp)
+ # make sure you're only calculating outliers for the correct variable 
+  variable <- data_chunk %>% dplyr::select(var)
+   # mark the outliers as 1
+  mark_outliers <- data.frame(ifelse(variable[1] >= upper_limits
+                          | variable <= lower_limits, 1, 0))
+   # make sure this name matches the variable name (e.g. L hipp)
+  names(mark_outliers) <- paste0(var, "_outliers")
+  # save the outlier 1s and 0s into a new column 
+  outlier_list <- rbind(outlier_list, mark_outliers)
+  # make sure the column name matches the variable name (e.g. L hipp)
+  names(outlier_list) <- paste0(var, "_outliers")
+} 
+  #print ("loop break")
+  # add the new column of outliers for each variable (e.g. L hipp) to the orig dataframe. 
+   fsdata6 <- cbind(fsdata6, outlier_list) 
+   
+}
+
+```
+
+## count outliers by group and wave
+```{r}
+  
+# use dplyr magic to get all of the info you need.
+fsdata_outlier_table <- fsdata6 %>%    
+         group_by(GROUP, index_wave) %>% # sort data by group and wave 
+         dplyr::summarize(N= n(), 
+                   Ramyg_outliers = sum(Right.Amygdala_outliers),
+                  Lamyg_outliers = sum(Left.Amygdala_outliers))
+
+fsdata_outlier_table
+
+save(fsdata_outlier_table,file = "tables/Right_and_Left_Amyg_outliers.Rdata")
+
+
+fsdata6$Right.Amyg.Cleaned <- ifelse(fsdata6$Right.Amygdala_outliers == 1, NA, fsdata6$Right.Amygdala)
+fsdata6$Left.Amyg.Cleaned <- ifelse(fsdata6$Left.Amygdala_outliers == 1, NA, fsdata6$Left.Amygdala)
+
+```
+
+## descriptives
+```{r}
+
+ggplot(fsdata6, aes(x =brain_age_yrs, y = Right.Amyg.Cleaned, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth()  + 
+  my_colors + my_colors2 
+
+```
+
+
+## 1) linear model
+interaction point around 12
+```{r, warnings = F}
+# same for ICV. 
+Ramyg_linear <- lmer(Right.Amyg.Cleaned ~ brain_age_yrs *GROUP + sex.c + ICV.c 
+                     + motion_ave_new.c + 
+                 scanner_confound.c + 
+                   (1 | IDENT_SUBID), data = fsdata6)
+
+summary(Ramyg_linear)
+save(Ramyg_linear, file = "model_output/Right_amyg_linear_model_results.Rdata")
+```
+
+### graph model with raw data 
+```{r, warnings = F}
+
+#  graph the model and confirm the post-hoc tests!! 
+effect_amyg <- as.data.frame(effect("brain_age_yrs:GROUP", Ramyg_linear, confint=TRUE, xlevels = list(brain_age_yrs=c(min(fsdata6$brain_age_yrs), min(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]), mean(fsdata6$brain_age_yrs),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "COMP"])))))
+# remove oldest and youngest PI age ranges. 
+effect_amyg <- effect_amyg %>%
+  filter(! (GROUP == "PI" & brain_age_yrs == min(brain_age_yrs[GROUP == "COMP"]))
+         & !(GROUP == "PI" & brain_age_yrs == max(brain_age_yrs[GROUP == "COMP"])))
+
+Ramyg_linear_plot_with_raw <- ggplot(effect_amyg, 
+                                    aes(x = brain_age_yrs, y = fit, color = GROUP)) +
+    geom_line(size = 1) + #facet_grid (~GROUP) + 
+    theme_classic() + ylab(bquote('Amygdala Volume '*(mm/100)^3*'')) + 
+    xlab ("Age (years)") + my_colors + my_colors2 + 
+    # add raw data points! 
+    geom_point(data = fsdata6, aes(x = brain_age_yrs, y = Right.Amyg.Cleaned, color = GROUP),
+              size = 1, alpha = 0.2) + 
+    geom_line(data = fsdata6, aes(x = brain_age_yrs, y = Right.Amyg.Cleaned, group = IDENT_SUBID), alpha = 0.2) +
+    scale_x_continuous(breaks = seq(4,21.5, by = 3)) +  theme(legend.position="none")
+
+#pdf (file = "figures/amygdala_linear_model_overlapping.#pdf", width = 6 , height = 4)
+Ramyg_linear_plot_with_raw
+#dev.off()
+
+#pdf (file = "figures/amygdala_linear_model_overlapping_CI.#pdf", width = 6 , height = 4)
+Ramyg_linear_plot_with_raw + geom_ribbon(aes(ymin=lower, ymax=upper, 
+                  group = GROUP, fill = GROUP), alpha =0.2, color = NA) 
+#dev.off()
+
+```
+
+
+## 2) quadratic model: NS
+```{r}
+
+Ramyg_quad <- lmer(Right.Amyg.Cleaned ~ (brain_age_yrs + I(brain_age_yrs^2)) * GROUP +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound.c +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Ramyg_quad)
+Ramyg_quad_model <- anova(Ramyg_quad)
+save(Ramyg_quad_model, file = "model_output/Right_Amyg_quadratic_model_results.Rdata")
+
+```
+
+### plot with facet by GROUP and raw data 
+```{r, warnings = F}
+age_list <- seq(5,19, by = 0.5)
+
+effect_agesq <- as.data.frame(effect("I(brain_age_yrs^2):GROUP", Ramyg_quad, confint=TRUE, xlevels = list(brain_age_yrs=c(min(fsdata6$brain_age_yrs), min(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]), age_list, mean(fsdata6$brain_age_yrs),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "COMP"])))))
+# remove oldest and youngest PI age ranges. 
+effect_agesq <- effect_agesq %>%
+  filter(! (GROUP == "PI" & brain_age_yrs == min(brain_age_yrs[GROUP == "COMP"]))
+         & !(GROUP == "PI" & brain_age_yrs == max(brain_age_yrs[GROUP == "COMP"])))
+
+
+### plot starts here. 
+Rquadratic_plot <- ggplot(effect_agesq, aes(x = brain_age_yrs, y = fit, 
+                                         color = GROUP )) +
+  # plot the lines! 
+  theme_classic() + my_colors + my_colors2 +  
+   geom_line( aes(group = GROUP, color = GROUP), size =1)  + 
+  ylab(bquote('Amygdala Volume '*(mm/100)^3*'')) + xlab("Age (years)")+ theme_classic () + 
+   theme(legend.position="none") + 
+  #raw data 
+   geom_point(data = fsdata6, aes(x= brain_age_yrs, y= Right.Amyg.Cleaned,
+                                color = GROUP), size=1, alpha = 0.2) + 
+  geom_line(data = fsdata6,aes(x= brain_age_yrs, y= Right.Amyg.Cleaned,  
+                                color = GROUP, group = IDENT_SUBID), alpha = 0.2) +
+     scale_x_continuous(breaks = seq(4,21.5, by = 3), limits=c(4, 21.5))
+
+#pdf(file = "figures/amygdala_quadratic_plot_with_raw.#pdf", width = 6, height = 4)
+Rquadratic_plot
+#dev.off()
+
+# add the CI ribbon...
+#pdf(file = "figures/amygdala_quadratic_plot_with_raw_CI.#pdf", width = 6, height = 4)
+Rquadratic_plot +  geom_ribbon(aes(ymin=lower, ymax=upper, fill = GROUP,
+                                    group = GROUP), color = NA, alpha=0.2) 
+#dev.off() 
+
+# facet groups 
+#pdf(file = "figures/amygdala_quadratic_plot_with_raw_CI_facet.#pdf", width = 6, height = 4)
+Rquadratic_plot +  geom_ribbon(aes(ymin=lower, ymax=upper, fill = GROUP,
+                                    group = GROUP), color = NA, alpha=0.2)  + facet_grid(~GROUP)
+#dev.off() 
+  
+```
+
+
+## 3) original piecewise model
+## run original version centered at bp
+```{r}
+# ages centered at bp,
+bp <- 9.4
+b1 <- function(x, bp) ifelse(x < bp,x, bp)
+b2 <- function(x, bp) ifelse(x < bp, bp, x)
+
+fsdata6$age1 <- b1(fsdata6$brain_age_yrs, bp) - bp
+fsdata6$age2 <- b2(fsdata6$brain_age_yrs, bp) - bp
+
+right_amyg_piecewise_orig <- lmer(Right.Amyg.Cleaned ~ 
+                GROUP*age1+ 
+                GROUP*age2 +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(right_amyg_piecewise_orig ) 
+# intercept of 10.96 = level for comparisons at breakpoint.
+save(right_amyg_piecewise_orig, file= "model_output/Right_amyg_piecewise_model_results.Rdata")
+```
+
+
+### plot katherines' version of model
+
+```{r}
+# make specific new data for COMP age effect.
+stuff <- data.frame(age1 = c(-10, -4, -3, -2, -1, -0.001, rep(0, 10)),
+                    age2 = c(rep(0, 6), .001, 1,2,3,4,5, 6, 7, 8, 9.5), 
+                    GROUP = c(rep("COMP", 16), rep("PI", 16)), 
+                sex.c = 0, ICV.c= 0, motion_ave_new.c = 0, scanner_confound = 0)
+nrow(stuff)
+
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~ GROUP*age1+ 
+                GROUP*age2 +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound,
+                data = stuff) 
+cis <- diag(fit.mat %*% tcrossprod(vcov(right_amyg_piecewise_orig), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+# 
+stuff$amyg_Y <- predict(right_amyg_piecewise_orig, stuff, re.form = NA)
+stuff$amyg_lwr <- stuff$amyg_Y-1.96*sqrt(cis)
+stuff$amyg_upr <- stuff$amyg_Y+1.96*sqrt(cis)
+
+stuffage1 <- stuff %>%
+  filter(age1 < 0) %>%
+  mutate(age1 = age1+ bp) %>%
+  dplyr::select(-age2) %>%
+  rename(brain_age_yrs = age1)
+
+stuffage2 <- stuff %>%
+  filter(age2 > 0) %>%
+  mutate(age2 = age2 + bp) %>%
+  dplyr::select(-age1) %>%
+  rename(brain_age_yrs = age2)
+```
+
+
+```{r}
+
+Ramyg_piecewise_plot <- ggplot(data = stuffage1, aes(x = brain_age_yrs, y = amyg_Y, color = GROUP)) + 
+  geom_line(size = 1) + geom_line(data = stuffage2, aes(x = brain_age_yrs, y = amyg_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 + theme_classic() +
+ ylab(bquote('Amygdala Volume '*(mm/100)^3*'')) + xlab("Age (years)") + 
+  geom_point(data = fsdata6,
+             aes(x= brain_age_yrs, y= Right.Amyg.Cleaned, color = GROUP), size=1, alpha = 0.15)+ 
+  geom_line(data = fsdata6,
+            aes(x = brain_age_yrs, y = Right.Amyg.Cleaned, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.15) + 
+ scale_x_continuous(breaks = seq(4,20.5, by = 3), limits=c(4.0, 20.5)) +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) 
+
+#pdf("figures/amygdala_piecewise_model_plot_overlapped.pdf", width = 6, height = 4)
+Ramyg_piecewise_plot
+#dev.off()
+
+#pdf("figures/amygdala_piecewise_model_plot_overlapped_CI.pdf", width = 6, height = 4)
+Ramyg_piecewise_plot + geom_ribbon(data = stuffage1, aes(ymin = amyg_lwr, ymax = amyg_upr, fill = GROUP), alpha = 0.3, color = NA) +
+  geom_ribbon(data = stuffage2, aes(ymin = amyg_lwr, ymax = amyg_upr, fill = GROUP), alpha = 0.3, color = NA)
+#dev.off()
+
+#pdf("figures/amygdala_piecewise_model_plot_overlapped_CI_facet.pdf", width = 6, height = 4)
+Ramyg_piecewise_plot + geom_ribbon(data = stuffage1, aes(ymin = amyg_lwr, ymax = amyg_upr, fill = GROUP), alpha = 0.3, color = NA) +
+  geom_ribbon(data = stuffage2, aes(ymin = amyg_lwr, ymax = amyg_upr, fill = GROUP), alpha = 0.3, color = NA) + facet_grid(~GROUP)
+#dev.off()
+```
+
+# 3) Left hemisphere alone
+
+## 1) linear model
+interaction point around 12
+```{r, warnings = F}
+# same for ICV. 
+Lamyg_linear <- lmer(Left.Amyg.Cleaned ~ brain_age_yrs *GROUP + sex.c + ICV.c 
+                     + motion_ave_new.c + 
+                 scanner_confound.c +(1 | IDENT_SUBID), data = fsdata6)
+
+summary(Lamyg_linear)
+
+save(Lamyg_linear, file = "model_output/Left_amyg_linear_model_results.Rdata")
+
+```
+
+### graph model with raw data 
+```{r, warnings = F}
+
+#  graph the model and confirm the post-hoc tests!! 
+effect_amyg <- as.data.frame(effect("brain_age_yrs:GROUP", Lamyg_linear, confint=TRUE, xlevels = list(brain_age_yrs=c(min(fsdata6$brain_age_yrs), min(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]), mean(fsdata6$brain_age_yrs),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "COMP"])))))
+# remove oldest and youngest PI age ranges. 
+effect_amyg <- effect_amyg %>%
+  filter(! (GROUP == "PI" & brain_age_yrs == min(brain_age_yrs[GROUP == "COMP"]))
+         & !(GROUP == "PI" & brain_age_yrs == max(brain_age_yrs[GROUP == "COMP"])))
+
+Lamyg_linear_plot_with_raw <- ggplot(effect_amyg, 
+                                    aes(x = brain_age_yrs, y = fit, color = GROUP)) +
+    geom_line(size = 1) + #facet_grid (~GROUP) + 
+    theme_classic() + ylab(bquote('Amygdala Volume '*(mm/100)^3*'')) + 
+    xlab ("Age (years)") + my_colors + my_colors2 + 
+    # add raw data points! 
+    geom_point(data = fsdata6, aes(x = brain_age_yrs, y = Left.Amyg.Cleaned, color = GROUP),
+              size = 1, alpha = 0.2) + 
+    geom_line(data = fsdata6, aes(x = brain_age_yrs, y = Left.Amyg.Cleaned, group = IDENT_SUBID), alpha = 0.2) +
+    scale_x_continuous(breaks = seq(4,21.5, by = 3)) +  theme(legend.position="none")
+
+#pdf (file = "figures/amygdala_linear_model_overlapping.#pdf", width = 6 , height = 4)
+Lamyg_linear_plot_with_raw
+#dev.off()
+
+#pdf (file = "figures/amygdala_linear_model_overlapping_CI.#pdf", width = 6 , height = 4)
+Lamyg_linear_plot_with_raw + geom_ribbon(aes(ymin=lower, ymax=upper, 
+                  group = GROUP, fill = GROUP), alpha =0.2, color = NA) 
+#dev.off()
+
+```
+
+
+## 2) quadratic model: NS
+```{r}
+
+Lamyg_quad <- lmer(Left.Amyg.Cleaned ~ (brain_age_yrs + I(brain_age_yrs^2)) * GROUP +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound.c +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Lamyg_quad)
+Lamyg_quad_model <- anova(Lamyg_quad)
+#save(amyg_quad_model, file = "model_output/Left_Amyg_quadratic_model_results.Rdata")
+
+```
+
+### plot with facet by GROUP and raw data 
+```{r, warnings = F}
+age_list <- seq(5,19, by = 0.5)
+
+effect_agesq <- as.data.frame(effect("I(brain_age_yrs^2):GROUP", Lamyg_quad, confint=TRUE, xlevels = list(brain_age_yrs=c(min(fsdata6$brain_age_yrs), min(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]), age_list, mean(fsdata6$brain_age_yrs),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "PI"]),
+  max(fsdata6$brain_age_yrs[fsdata6$GROUP == "COMP"])))))
+# remove oldest and youngest PI age ranges. 
+effect_agesq <- effect_agesq %>%
+  filter(! (GROUP == "PI" & brain_age_yrs == min(brain_age_yrs[GROUP == "COMP"]))
+         & !(GROUP == "PI" & brain_age_yrs == max(brain_age_yrs[GROUP == "COMP"])))
+
+
+### plot starts here. 
+Lquadratic_plot <- ggplot(effect_agesq, aes(x = brain_age_yrs, y = fit, 
+                                         color = GROUP )) +
+  # plot the lines! 
+  theme_classic() + my_colors + my_colors2 +  
+   geom_line( aes(group = GROUP, color = GROUP), size =1)  + 
+  ylab(bquote('Amygdala Volume '*(mm/100)^3*'')) + xlab("Age (years)")+ theme_classic () + 
+   theme(legend.position="none") + 
+  #raw data 
+   geom_point(data = fsdata6, aes(x= brain_age_yrs, y= Left.Amyg.Cleaned,
+                                color = GROUP), size=1, alpha = 0.2) + 
+  geom_line(data = fsdata6,aes(x= brain_age_yrs, y= Left.Amyg.Cleaned,  
+                                color = GROUP, group = IDENT_SUBID), alpha = 0.2) +
+     scale_x_continuous(breaks = seq(4,21.5, by = 3), limits=c(4, 21.5))
+
+#pdf(file = "figures/amygdala_quadratic_plot_with_raw.#pdf", width = 6, height = 4)
+Lquadratic_plot
+#dev.off()
+
+# add the CI ribbon...
+#pdf(file = "figures/amygdala_quadratic_plot_with_raw_CI.#pdf", width = 6, height = 4)
+Lquadratic_plot +  geom_ribbon(aes(ymin=lower, ymax=upper, fill = GROUP,
+                                    group = GROUP), color = NA, alpha=0.2) 
+#dev.off() 
+
+# facet groups 
+#pdf(file = "figures/amygdala_quadratic_plot_with_raw_CI_facet.#pdf", width = 6, height = 4)
+Lquadratic_plot +  geom_ribbon(aes(ymin=lower, ymax=upper, fill = GROUP,
+                                    group = GROUP), color = NA, alpha=0.2)  + facet_grid(~GROUP)
+#dev.off() 
+  
+```
+
+
+## 3) original piecewise model
+## run original version centered at bp
+```{r}
+# ages centered at bp,
+bp <- 9.4
+fsdata6$age1 <- b1(fsdata6$brain_age_yrs, bp) - bp
+fsdata6$age2 <- b2(fsdata6$brain_age_yrs, bp) - bp
+hist(fsdata6$age1) # age1 is zero when > 9.4 yrs
+hist(fsdata6$age2) # age2 is zero when < 9.4  yrs
+Left_amyg_piecewise_orig <- lmer(Left.Amyg.Cleaned ~ 
+                GROUP*age1+ 
+                GROUP*age2 +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Left_amyg_piecewise_orig ) 
+# intercept of 10.96 = level for comparisons at breakpoint.
+save(Left_amyg_piecewise_orig, file= "model_output/Left_amyg_piecewise_model_results.Rdata")
+```
+
+
+### plot katherines' version of model
+
+```{r}
+# make specific new data for COMP age effect.
+stuff <- data.frame(age1 = c(-5, -4, -3, -2, -1, -0.001, rep(0, 10)),
+                    age2 = c(rep(0, 6), .001, 1,2,3,4,5, 6, 7, 8, 9.5), 
+                    GROUP = c(rep("COMP", 16), rep("PI", 16)), 
+                sex.c = 0, ICV.c= 0, motion_ave_new.c = 0, scanner_confound = 0)
+nrow(stuff)
+
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~ GROUP*age1+ 
+                GROUP*age2 +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound,
+                data = stuff) 
+cis <- diag(fit.mat %*% tcrossprod(vcov(Left_amyg_piecewise_orig), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+# 
+stuff$amyg_Y <- predict(Left_amyg_piecewise_orig, stuff, re.form = NA)
+stuff$amyg_lwr <- stuff$amyg_Y-1.96*sqrt(cis)
+stuff$amyg_upr <- stuff$amyg_Y+1.96*sqrt(cis)
+
+stuffage1 <- stuff %>%
+  filter(age1 < 0) %>%
+  mutate(age1 = age1+ bp) %>%
+  dplyr::select(-age2) %>%
+  rename(brain_age_yrs = age1)
+
+stuffage2 <- stuff %>%
+  filter(age2 > 0) %>%
+  mutate(age2 = age2 + bp) %>%
+  dplyr::select(-age1) %>%
+  rename(brain_age_yrs = age2)
+```
+
+
+```{r}
+
+Lamyg_piecewise_plot <- ggplot(data = stuffage1, aes(x = brain_age_yrs, y = amyg_Y, color = GROUP)) + 
+  geom_line(size = 1) + geom_line(data = stuffage2, aes(x = brain_age_yrs, y = amyg_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 + theme_classic() +
+ ylab(bquote('Amygdala Volume '*(mm/100)^3*'')) + xlab("Age (years)") + 
+  geom_point(data = fsdata6,
+             aes(x= brain_age_yrs, y= Left.Amyg.Cleaned, color = GROUP), size=1, alpha = 0.15)+ 
+  geom_line(data = fsdata6,
+            aes(x = brain_age_yrs, y = Left.Amyg.Cleaned, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.15) + 
+ scale_x_continuous(breaks = seq(4,20.5, by = 3), limits=c(4.0, 20.5)) +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) 
+
+#pdf("figures/amygdala_piecewise_model_plot_overlapped.pdf", width = 6, height = 4)
+Lamyg_piecewise_plot
+#dev.off()
+
+#pdf("figures/amygdala_piecewise_model_plot_overlapped_CI.pdf", width = 6, height = 4)
+Lamyg_piecewise_plot + geom_ribbon(data = stuffage1, aes(ymin = amyg_lwr, ymax = amyg_upr, fill = GROUP), alpha = 0.3, color = NA) +
+  geom_ribbon(data = stuffage2, aes(ymin = amyg_lwr, ymax = amyg_upr, fill = GROUP), alpha = 0.3, color = NA)
+#dev.off()
+
+#pdf("figures/amygdala_piecewise_model_plot_overlapped_CI_facet.pdf", width = 6, height = 4)
+Lamyg_piecewise_plot + geom_ribbon(data = stuffage1, aes(ymin = amyg_lwr, ymax = amyg_upr, fill = GROUP), alpha = 0.3, color = NA) +
+  geom_ribbon(data = stuffage2, aes(ymin = amyg_lwr, ymax = amyg_upr, fill = GROUP), alpha = 0.3, color = NA) + facet_grid(~GROUP)
+#dev.off()
+```
+
+
+# 4) Sex effects 
+
+## N for sex by wave
+```{r}
+fsdata6$sex.f <- as.factor(ifelse(fsdata6$sex == 0, 0, 1 ))
+summary(fsdata6$sex.f)
+sex_amyg_table <- fsdata6 %>%
+  group_by(GROUP, index_wave, sex.f) %>%
+  dplyr::summarize(N = n())
+sex_amyg_table
+save(sex_amyg_table, file = "tables/Sex_by_group_and_wave_for_amygdata.Rdata")
+```
+
+## main effect of sex (M > F) for amygdala in Pieecwise
+```{r}
+# ages centered at bp,
+Amyg_piecewise_sex <- lmer(Amyg_ave ~ 
+                GROUP*age1 + 
+                GROUP*age2 + sex.f +
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Amyg_piecewise_sex ) 
+
+
+## same thing, but in linear model. 
+
+Amyg_linear_sex <- lmer(Amyg_ave ~ 
+                GROUP*brain_age_yrs.c + sex.f +
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Amyg_linear_sex) 
+```
+
+## sex does interact with group: 
+```{r}
+fsdata6$GROUP.n <- as.factor(ifelse(fsdata6$GROUP == "COMP", 0, 1))
+Amyg_linear_groupxsex <- lmer(Amyg_ave ~ GROUP.n*sex.f+
+                GROUP.n*brain_age_yrs.c +  
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Amyg_linear_groupxsex)
+save(Amyg_linear_groupxsex, file = "model_output/SexXgroup_linear_model_results.Rdata")
+
+```
+
+## plot the sex effects 
+```{r}
+effect_df <- data.frame(effect("GROUP.n:sex.f", Amyg_linear_groupxsex)) %>%
+  mutate(GROUP = ifelse(GROUP.n == 0, "COMP", "PI"), 
+         Sex = ifelse(sex.f == 0, "Male", "Female"))
+
+effect_plot <- ggplot(data = effect_df, aes(x = GROUP, y = fit, 
+                                            color = GROUP, fill = GROUP)) + 
+  geom_point(size = 3) + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.5) + 
+  ylab("Amygdala Volume") + xlab("GROUP") + facet_grid(~Sex) + 
+  geom_jitter(data =  fsdata6, aes(x = GROUP, y = Amyg_ave), 
+              alpha = 0.12, width= 0.15) + 
+  theme_classic() + my_colors + my_colors2 + theme(legend.position = "none")
+
+effect_plot
+
+ggsave(effect_plot, file = "figures/Amyg_volume_by_groupxSex.pdf", width = 6, height = 4)
+```
+
+## post-hoc test on group x sex effect - driven by what conditions?
+```{r}
+## GETTING SLOPES FOR AGE EFFECTS, PER GROUP
+male_group_diff <- data.frame(sex = "male", condslope.lmer.pointestimates( "GROUP.n1","sex.f1", 0, Amyg_linear_groupxsex))
+female_group_diff <- data.frame(sex = "female", condslope.lmer.pointestimates("GROUP.n1", "sex.f1", 1, Amyg_linear_groupxsex))
+
+# need to flip the X:Z interaction order for the sake of the condslope function. 
+Amyg_linear_groupxsex2 <- lmer(Amyg_ave ~ sex.f*GROUP.n +
+                GROUP.n*brain_age_yrs.c +  
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Amyg_linear_groupxsex2)
+
+COMP_sex_diff <- data.frame(sex = "COMP",condslope.lmer.pointestimates( "sex.f1","GROUP.n1", 0, Amyg_linear_groupxsex2))
+PI_sex_diff <- data.frame(sex = "PI", condslope.lmer.pointestimates("sex.f1","GROUP.n1", 1, Amyg_linear_groupxsex2))
+
+sex_amyg_posthoc_tests <- rbind(male_group_diff, female_group_diff, COMP_sex_diff, PI_sex_diff)
+
+sex_amyg_posthoc_tests <- sex_amyg_posthoc_tests %>%
+  dplyr::select(-w0.intercept)
+names(sex_amyg_posthoc_tests) <- c("GROUP", "Estimate", "df", "t.value", "p.value", "lower.95%.CI", "upper.95.CI%")
+
+# effect of interest: 'male' constrast compares PI males and COMP males.
+sex_amyg_posthoc_tests
+save(sex_amyg_posthoc_tests, file = "model_output/sexXgroup_amyg_posthoc_tests.Rdata")
+```
+
+## does sex interact with  age? NO. 
+```{r}
+
+Amyg_linear_agexsex <- lmer(Amyg_ave ~  GROUP*sex.f + 
+                GROUP + brain_age_yrs.c * sex.f +
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Amyg_linear_agexsex) 
+save(Amyg_linear_agexsex, file = "model_output/SexXage_linear_model_results.Rdata")
+
+```
+
+## 3 way group x sex x age interaction? No. 
+```{r}
+# linear
+Amyg_linear_sexgroupage <- lmer(Amyg_ave ~ 
+                GROUP*brain_age_yrs.c * sex.f +
+                ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata6)
+summary(Amyg_linear_sexgroupage) 
+save(Amyg_linear_sexgroupage, file = "model_output/SexXgroupXage_linear_model_results.Rdata")
+
+```
+
+# 5) AGE OF ADOPTION IN PIS 
+```{r}
+load("../../../data/3_ALL_long_cort_symptoms_brain_structure_all_ages_2019-11-12.Rdata")
+#names(monster_SB)[grepl("ORPH", names(monster_SB))]
+#names(monster_SB)[grepl("ADOPT", names(monster_SB))]
+#names(monster_SB)[grepl("testos", names(monster_SB))]
+
+nrow(monster_SB)
+nrow(fsdata6)
+vars_keep <- monster_SB %>%
+  dplyr::select(IDENT_SUBID, index_wave, IAI_3_AGEORPH, IAI_7_AGEADOPT, PDS_mean, testos, testos_normed, batch) %>%
+  mutate(age_adopt_log = log(IAI_7_AGEADOPT + 0.4), 
+         age_placed_log = log(IAI_3_AGEORPH + 0.4)) %>%
+  mutate(duration_adversity = (IAI_7_AGEADOPT - IAI_3_AGEORPH)) %>%
+  mutate(duration_split = as.factor(ifelse(duration_adversity > median(duration_adversity, na.rm = T), "late", "early"))) 
+
+
+# also adding puberty and other variables we will need later
+fsdata_pds <- merge(fsdata6, vars_keep,  by = c("IDENT_SUBID", "index_wave"))
+#nrow(fsdata_pds) # successfully added variables but kept all rows.
+nrow(fsdata6)
+```
+
+## subset only PIs for the adoption duration analysis 
+```{r}
+fsdata_adopt <- subset(fsdata_pds, GROUP == "PI") # & !is.na(duration_split))
+nrow(fsdata_adopt)
+
+```
+
+## get demographic info on PIs in this subsample.
+```{r}
+
+adopt_vars_wide <- fsdata_adopt %>%
+  filter(brain_age_yrs == min_age) %>%
+  group_by(IDENT_SUBID) %>%
+  dplyr::summarize(IAI_3_AGEORPH = mean(IAI_3_AGEORPH, na.rm = T), 
+            IAI_7_AGEADOPT = mean(IAI_7_AGEADOPT, na.rm = T),
+            age_adopt_log = log(mean(IAI_7_AGEADOPT) + 0.4), 
+            age_placed_log = log(mean(IAI_3_AGEORPH) + 0.4),
+            duration_adversity = mean(duration_adversity, na.rm = T), 
+            sex = mean(sex, na.rm = T), 
+            brain_age_yrs = mean(brain_age_yrs), na.rm = T)
+nrow(adopt_vars_wide)
+
+## how many subjects are missing adoption info??? ALOT. 
+N_for_adoption_brain_table <- adopt_vars_wide %>%
+            dplyr::summarize (N = n(), 
+               has_age_inst = sum(!is.na(IAI_3_AGEORPH)),
+            has_age_adopt = sum(!is.na(IAI_7_AGEADOPT)),
+            has_duration = sum(!is.na(duration_adversity)),
+            missing_age_inst = sum(is.na(IAI_3_AGEORPH)),
+            missing_age_adopt = sum(is.na(IAI_7_AGEADOPT)),
+            missing_duration = sum(is.na(duration_adversity)))
+N_for_adoption_brain_table
+save(N_for_adoption_brain_table, file = "tables/adoption_N_missing_table_brain_sample.Rdata")
+
+adoption_brain_table <- adopt_vars_wide %>%
+  # issue is that this has multiple columns per subj. 
+  dplyr::summarize(mean_age_inst = mean(IAI_3_AGEORPH, na.rm = T),
+            sd_age_inst = sd(IAI_3_AGEORPH, na.rm = T), 
+            min_age_inst = min(IAI_3_AGEORPH, na.rm = T),
+            max_age_inst = max(IAI_3_AGEORPH, na.rm = T),
+            mean_age_adopt = mean(IAI_7_AGEADOPT, na.rm = T), 
+            sd_age_adopt = sd(IAI_7_AGEADOPT, na.rm = T), 
+            min_age_adopt = min(IAI_7_AGEADOPT, na.rm = T),
+            max_age_adopt = max(IAI_7_AGEADOPT, na.rm = T),
+            mean_duration = mean(duration_adversity, na.rm = T), 
+            sd_duration = sd(duration_adversity, na.rm = T), 
+            min_duration = min(duration_adversity, na.rm = T),
+            max_duration = max(duration_adversity, na.rm = T))
+
+adoption_brain_table
+save(adoption_brain_table, file = "tables/adoption_descriptives_table_brain_sample.Rdata")
+
+```
+
+## check normal distributed... using log versions. 
+```{r}
+hist(adopt_vars_wide$IAI_7_AGEADOPT)
+hist(adopt_vars_wide$age_adopt_log)
+shapiro.test(adopt_vars_wide$IAI_7_AGEADOPT)
+shapiro.test(adopt_vars_wide$age_adopt_log)
+
+hist(adopt_vars_wide$IAI_3_AGEORPH)
+hist(adopt_vars_wide$age_placed_log)
+shapiro.test(adopt_vars_wide$age_placed_log)
+
+```
+
+## identify extreme cases - exclude 
+```{r}
+outlier_age_orph <- mean(adopt_vars_wide$age_placed_log, na.rm = T) + 3*sd(adopt_vars_wide$age_placed_log, na.rm = T)
+outlier_age_adopt <- mean(adopt_vars_wide$age_adopt_log, na.rm = T) + 3*sd(adopt_vars_wide$age_adopt_log, na.rm = T)
+
+# no outliers
+N_excluded_Adopt <- sum(ifelse(adopt_vars_wide$age_adopt_log > outlier_age_adopt, 1, 0), na.rm = T)
+N_excluded_Adopt
+
+N_excluded_orph <- sum(ifelse(adopt_vars_wide$age_placed_log > outlier_age_orph, 1, 0), na.rm = T)
+N_excluded_orph
+
+```
+
+## correlations: age adopt and age place are SUPER correlated.
+```{r}
+# positively correlated. so participants with later age of orphanage placement have later age of adoption.
+cor.test(adopt_vars_wide$IAI_3_AGEORPH, adopt_vars_wide$IAI_7_AGEADOPT)
+
+cor.test(adopt_vars_wide$age_adopt_log, adopt_vars_wide$age_placed_log)
+```
+
+## linear models 
+because PI group doesn't show piecewise age-related amyg change.
+### log age of adoption: NS
+```{r}
+# linear model...which makes sense in the PIs because they don't have amyg changes. 
+amyg_logageadopt <- lmer(Amyg_ave ~  brain_age_yrs.c + age_adopt_log + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_adopt)
+
+summary(amyg_logageadopt)
+save(amyg_logageadopt, file = "model_output/logageadopt_amyg_main_effect_model_results.Rdata")
+```
+
+
+
+### log age of adoption X age: NS
+```{r}
+amyg_logageadoptxage <- lmer(Amyg_ave ~  brain_age_yrs.c * age_adopt_log + #age_placed_log +  
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_adopt)
+
+summary(amyg_logageadoptxage)
+```
+
+### log age of adoption with log age placed: NS
+```{r}
+amyg_logageadopt_logageplaced <- lmer(Amyg_ave ~  brain_age_yrs.c + age_adopt_log + age_placed_log +  
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_adopt)
+
+summary(amyg_logageadopt_logageplaced )
+save(amyg_logageadopt_logageplaced , file = "model_output/logageadopt_logageplaced_amyg_main_effect_model_results.Rdata")
+```
+
+### CHILD ONLY log age of adoption with log age placed: NS
+```{r}
+# linear model...which makes sense in the PIs because they don't have amyg changes. 
+amyg_logageadopt_logageplaced_child <- lmer(Amyg_ave ~  brain_age_yrs.c + age_adopt_log + age_placed_log +  
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = subset(fsdata_adopt, brain_age_yrs < 9.4))
+
+summary(amyg_logageadopt_logageplaced_child)
+#save(amyg_logageadopt_logageplaced , file = "model_output/logageadopt_logageplaced_amyg_main_effect_model_results.Rdata")
+```
+
+### CHILD ONLY log age of adoption with log age placed: NS
+cut off at piecewise age split of 9.4 
+```{r}
+# linear model...which makes sense in the PIs because they don't have amyg changes. 
+amyg_logageadopt_logageplaced_adol <- lmer(Amyg_ave ~  brain_age_yrs.c + age_adopt_log + age_placed_log +  
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = subset(fsdata_adopt, brain_age_yrs > 9.4))
+
+summary(amyg_logageadopt_logageplaced_adol)
+#save(amyg_logageadopt_logageplaced , file = "model_output/logageadopt_logageplaced_amyg_main_effect_model_results.Rdata")
+```
+
+
+# 6) PDS SCALE
+
+## get descriptives 
+```{r}
+fsdata_pds$GROUP.n <- with(fsdata_pds, ifelse(GROUP == "COMP", 0, 1))
+PDS_df_by_subj <- fsdata_pds %>%
+  group_by(IDENT_SUBID, index_wave) %>%
+  dplyr::summarize(age = mean(brain_age_yrs), 
+            sex = mean(DEM_3_GENDER_CHILD),
+            PDS_mean = mean(PDS_mean, na.rm =T), 
+            GROUP.n = mean(GROUP.n))
+
+
+  PDS_brain_demo <- PDS_df_by_subj %>%
+      mutate(GROUP = ifelse(GROUP.n == 0, "COMP", "PI")) %>%
+    group_by(GROUP, index_wave) %>%
+    dplyr::summarize(
+              N_with_PDS = sum(!is.na(PDS_mean)),
+              N_missing_PDS = sum(is.na(PDS_mean)),
+              mean_age = round(mean(age[!is.na(PDS_mean)]),2),
+              sd_age = round(sd(age[!is.na(PDS_mean)]),2),
+              min_age = round(min(age[!is.na(PDS_mean)]),2),
+              max_age = round(max(age[!is.na(PDS_mean)]),2),
+              mean_PDS = round(mean(PDS_mean, na.rm = T),2),
+              sd_PDS = round(sd(PDS_mean, na.rm = T),2),
+              min_PDS = round(min(PDS_mean, na.rm = T),2),
+              max_PDS = round(max(PDS_mean, na.rm = T),2))
+PDS_brain_demo
+save(PDS_brain_demo, file = "tables/PDS_subsample_brain_demo.Rdata")
+
+```
+
+
+
+## sanity check in sub-sample: Group X Age is still significant.
+```{r}
+Amyg_groupxage <- lmer(Amyg_ave ~  brain_age_yrs.c*GROUP +
+                GROUP + PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_groupxage) 
+save(Amyg_groupxage, file = "model_output/PDS_subsample_groupxage_amyg_model_results.Rdata" )
+```
+
+## linear main effect of PDS with age: NS
+```{r}
+Amyg_PDS_age <- lmer(Amyg_ave ~  brain_age_yrs.c +
+                GROUP + PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_PDS_age ) 
+save(Amyg_PDS_age, file = "model_output/PDS_with_age_amyg_model_results.Rdata" )
+```
+
+## linear PDS x group effects with age:NS 
+```{r}
+
+Amyg_PDSxgroup_age <- lmer(Amyg_ave ~ brain_age_yrs.c + 
+                GROUP*PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_PDSxgroup_age ) 
+
+save(Amyg_PDSxgroup_age, file = "model_output/PDSxgroup_with_age_amyg_model_results.Rdata" )
+```
+
+
+## linear PDS main effects without age: TREND
+```{r}
+# ages centered at bp,
+Amyg_PDS_no_age <- lmer(Amyg_ave ~  
+                GROUP + PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_PDS_no_age ) 
+save(Amyg_PDS_no_age, file = "model_output/PDS_no_age_amyg_model_results.Rdata" )
+```
+
+## linear group x PDS effects without age: NS
+
+```{r}
+Amyg_PDSxgroup_no_age <- lmer(Amyg_ave ~  
+                GROUP*PDS_mean + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_PDSxgroup_no_age ) 
+
+save(Amyg_PDSxgroup_no_age, file = "model_output/PDSxgroup_without_age_amyg_model_results.Rdata" )
+```
+
+
+
+
+# 7) TESTOS 
+
+## center
+```{r}
+fsdata_pds$testos_normed.c <- fsdata_pds$testos_normed - mean(fsdata_pds$testos_normed, na.rm = T)
+summary(fsdata_pds$testos_normed.c)
+
+cor.test(fsdata_pds$testos_normed,  fsdata_pds$brain_age_yrs)
+```
+
+## descriptive info on testos.
+
+```{r}
+
+testos_df_by_subj <- fsdata_pds %>%
+  group_by(IDENT_SUBID, index_wave) %>%
+  dplyr::summarize(age = mean(brain_age_yrs), 
+            sex = mean(DEM_3_GENDER_CHILD),
+            testos_normed = mean(testos_normed, na.rm =T), 
+            GROUP.n = mean(GROUP.n))
+
+testos_brain_demo <- testos_df_by_subj %>%
+      mutate(GROUP = ifelse(GROUP.n == 0, "COMP", "PI")) %>%
+    group_by(GROUP, index_wave) %>%
+    dplyr::summarize( N_with_testos = sum(!is.na(testos_normed)),
+              N_missing_testos = sum(is.na(testos_normed)),
+              mean_age = mean(age[!is.na(testos_normed)]),
+              sd_age = sd(age[!is.na(testos_normed)]),
+              min_age = min(age[!is.na(testos_normed)]),
+              max_age = max(age[!is.na(testos_normed)]),
+              mean_testos = mean(testos_normed, na.rm = T),
+              sd_testos = sd(testos_normed, na.rm = T),
+              min_testos = min(testos_normed, na.rm = T),
+              max_testos = max(testos_normed, na.rm = T))
+testos_brain_demo
+save(testos_brain_demo, file = "tables/testos_subsample_brain_demo.Rdata")
+
+```
+
+## note: testos already log-transformed!
+```{r}
+hist(fsdata_pds$testos)
+hist(fsdata_pds$testos_normed)
+```
+
+## plot testos vs. age in males vs. females
+fixed! only one row of data per subject per wave. 
+```{r}
+
+ggplot(fsdata_pds, aes(x =brain_age_yrs, y = testos, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = "lm") + facet_grid(~sex)
+
+```
+
+consistent across waves!!!
+```{r}
+ggplot(fsdata_pds, aes(x =brain_age_yrs, y = testos, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = "lm") + facet_grid(~index_wave)
+nrow(fsdata_pds)
+```
+
+## linear testos main effect with age: SIG
+positive main effect.
+```{r}
+
+Amyg_testos_normed_with_age <- lmer(Amyg_ave ~ batch + 
+                GROUP.n + testos_normed.c + brain_age_yrs.c + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_testos_normed_with_age) 
+save(Amyg_testos_normed_with_age, file  = "model_output/testos_normed_with_age_amyg_model_results.Rdata")
+```
+
+
+## linear group x testos with age: 
+```{r}
+# same with or without age in the model. 
+Amyg_testos_normedxgroup_with_age <- lmer(Amyg_ave ~ 
+                testos_normed.c*GROUP.n + brain_age_yrs.c +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_testos_normedxgroup_with_age) 
+
+save(Amyg_testos_normedxgroup_with_age, file  = "model_output/testos_normedxgroup_with_age_amyg_model_results.Rdata")
+
+```
+
+
+## post-hoc tests
+```{r}
+# get slopes 
+COMP_testos_slope <- data.frame(group = "COMP",condslope.lmer.slopes( "testos_normed.c","GROUP.n", 0, Amyg_testos_normedxgroup_with_age))
+
+PI_testos_slope <- data.frame(group = "PI", condslope.lmer.slopes("testos_normed.c","GROUP.n", 1, Amyg_testos_normedxgroup_with_age))
+
+testos_amyg_with_age_posthoc_tests <- rbind(COMP_testos_slope, PI_testos_slope)
+
+testos_amyg_with_age_posthoc_tests <- testos_amyg_with_age_posthoc_tests %>%
+  dplyr::select(-w0.intercept)
+names(testos_amyg_with_age_posthoc_tests) <- c("GROUP", "Estimate", "df", "t.value", "p.value", "lower.95%.CI", "upper.95.CI%")
+
+save(testos_amyg_with_age_posthoc_tests, file = "model_output/testos_withage_amyg_posthoc_tests.Rdata")
+
+## get point estimates
+Amyg_testos_normedxgroup_with_age2 <- lmer(Amyg_ave ~ 
+                GROUP.n*testos_normed.c + brain_age_yrs.c +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_testos_normedxgroup_with_age2) 
+
+lower_testos_groupdiff <- data.frame(testos = "1SD lower", condslope.lmer.pointestimates("GROUP.n","testos_normed.c", -1*sd(fsdata_pds$testos_normed, na.rm = T), Amyg_testos_normedxgroup_with_age2))
+
+upper_testos_groupdiff <- data.frame(testos = "1SD upper", condslope.lmer.pointestimates("GROUP.n","testos_normed.c", +1*sd(fsdata_pds$testos_normed, na.rm = T), Amyg_testos_normedxgroup_with_age2))
+
+```
+
+## plot effect
+volume increases in COMPS with increasing testosterone
+decreases in PIs with increasing testosterone
+```{r}
+plot(effect("testos_normed.c:GROUP.n", Amyg_testos_normedxgroup_with_age), multiline = T)
+
+```
+
+
+## linear group x testos with age x group: redundancy! 
+```{r}
+# same with or without age in the model. 
+Amyg_testos_normedxgroup_with_agexgroup <- lmer(Amyg_ave ~ 
+                testos_normed.c*GROUP.n + brain_age_yrs.c*GROUP +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_testos_normedxgroup_with_agexgroup) 
+save(Amyg_testos_normedxgroup_with_agexgroup, file  = "model_output/testos_normedxgroup_with_agexgroup_amyg_model_results.Rdata")
+
+```
+
+## linear main effect of testos without age: huge SIG main effect
+```{r}
+
+Amyg_testos <- lmer(Amyg_ave ~ batch + 
+                GROUP + testos_normed + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_testos) 
+save(Amyg_testos, file  = "model_output/testos_normed_amyg_model_results.Rdata")
+
+```
+
+## linear group x testos without age:  SIG 
+```{r}
+Amyg_testos_normedxgroup <- lmer(Amyg_ave ~ 
+               testos_normed.c*GROUP.n + 
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_testos_normedxgroup ) 
+
+save(Amyg_testos_normedxgroup, file  = "model_output/testos_normedxgroup_amyg_model_results.Rdata")
+```
+
+
+## post-hoc tests without age
+```{r}
+# get slopes 
+COMP_testos_slope <- data.frame(group = "COMP",condslope.lmer.slopes( "testos_normed.c","GROUP.n", 0, Amyg_testos_normedxgroup))
+
+PI_testos_slope <- data.frame(group = "PI", condslope.lmer.slopes("testos_normed.c","GROUP.n", 1, Amyg_testos_normedxgroup))
+
+testos_amyg_posthoc_tests <- rbind(COMP_testos_slope, PI_testos_slope)
+
+testos_amyg_posthoc_tests <- testos_amyg_posthoc_tests %>%
+  dplyr::select(-w0.intercept)
+names(testos_amyg_posthoc_tests) <- c("GROUP", "Estimate", "df", "t.value", "p.value", "lower.95%.CI", "upper.95.CI%")
+testos_amyg_posthoc_tests
+save(testos_amyg_posthoc_tests, file = "model_output/testos_amyg_posthoc_tests.Rdata")
+
+## get point estimates
+Amyg_testos_normedxgroup_with_age2 <- lmer(Amyg_ave ~ 
+                GROUP.n*testos_normed.c + brain_age_yrs.c +
+                sex.c + ICV.c + motion_ave_new.c + scanner_confound +
+                (1 | IDENT_SUBID), data = fsdata_pds)
+summary(Amyg_testos_normedxgroup_with_age2) 
+
+lower_testos_groupdiff <- data.frame(testos = "1SD lower", condslope.lmer.pointestimates("GROUP.n","testos_normed.c", -1*sd(fsdata_pds$testos_normed, na.rm = T), Amyg_testos_normedxgroup_with_age2))
+
+upper_testos_groupdiff <- data.frame(testos = "1SD upper", condslope.lmer.pointestimates("GROUP.n","testos_normed.c", +1*sd(fsdata_pds$testos_normed, na.rm = T), Amyg_testos_normedxgroup_with_age2))
+
+```
+
+## 8) Power analysis of main model 
+
+### observed power analysis
+```{r}
+# load model object 
+load("../manuscript/model_output/Amyg_piecewise_orig_results.Rdata")
+model <- data.frame(summary(Amyg_piecewise_orig)$coefficients)
+model$Coefficients <- rownames(model)
+
+# run 'observed power" calculation for your model with niall's function
+pow2 <- function (beta, se) {
+  z1mb = abs(beta/se) - 1.96
+  pow = (pnorm(abs(beta/se) - 1.96, mean = 0, sd = 1, lower.tail = TRUE))
+  result <- list("power"= pow)
+  return(result)
+}
+
+# 86 % power for the age x group effect.
+obs_pwr_groupxage1 <- pow2(beta = model$Estimate[model$Coefficients == "GROUPPI:age1"], se = model$Std..Error[model$Coefficients == "GROUPPI:age1"])
+
+# this isn't an effect that's significant! 
+obs_pwr_groupxage2 <- pow2(beta = model$Estimate[model$Coefficients == "GROUPPI:age2"], se = model$Std..Error[model$Coefficients == "GROUPPI:age2"])
+
+obs_pwr_groupxage1
+obs_pwr_groupxage2
+save(obs_pwr_groupxage1, obs_pwr_groupxage2, file = "model_output/obs_pwr_amyg_piecewise.rda")
+```

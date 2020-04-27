@@ -1,0 +1,406 @@
+---
+title: 'Checking confound variables: motion, aseg, scanner confound, ICV/GMV'
+author: "Michelle VanTieghem"
+date: "January 23, 2018"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# Readme:
+following same procedure for descriptives, with subset of scans (6-19)
+ 
+```{r, include = F, warnings =F, echo = F}
+source("../../0_R_analysis_setup_file.R")
+
+```
+
+# load data
+```{r}
+load("../../../data/2_fs_data/3_cleaned_fsdata_for_growth_chart_brain_age_yrs6_19.Rdata")
+
+```
+
+
+# check correlations among variables 
+## hemisphere correlations 
+```{r, warnings = F}
+with(fsdata6, cor.test(Right.Hippocampus, Left.Hippocampus))
+with(fsdata6, cor.test(Right.Amygdala, Left.Amygdala))
+cor.test(fsdata6$Amyg_ave, fsdata6$Hipp_ave)
+```
+
+## CONFOUND VARIABLES
+### make correlation matrix of amyg vol, ICV, GBV, motion, and aseg 
+```{r, warnings = F}
+
+my_data <- data.frame(with(fsdata6, cbind(brain_age_yrs, motion_ave_new, aseg_ave_rating, 
+                                 ICV, GMV, Amyg_ave,Hipp_ave)))
+names(my_data) <- c("brain_age_yrs",  "Motion", "Segmentation","ICV", "GMV", "Amygdala", "Hippocampus")
+cor.table <- cor(my_data)
+good_table <- round(cor.table, 2)
+
+save(good_table, file = "tables/confound_variable_correlation_matrix.Rdata")
+```
+
+## get significance for each... 
+```{r}
+# make an empty table.
+compiled_correlations <- data.frame(x = NA, y = NA, pvalue = NA)
+
+# for each column in mydata...
+for (i in 1:ncol(my_data)){
+  print (i)
+  var1 <- my_data[i]
+  var1_name <- names(var1)
+     var1_test <- as.matrix(var1)
+  # get every other column in the dataframe...
+  for (j in 1:ncol(my_data)){
+    print (j)
+     var2 <-my_data[j]
+     var2_name <- names(var2)
+     var2_test <- as.matrix(var2)
+     # run the correlation and save the p-value...
+     p_value <- cor.test(var1_test, var2_test)[3]
+     # keep the p-value 
+    row <- cbind(x=var1_name, y=var2_name, pvalue = p_value)
+    compiled_correlations <- rbind(compiled_correlations, row)
+
+  }
+}
+compiled_correlations$sig_level <- ifelse(compiled_correlations$pvalue < 0.001, '***', 
+                                          ifelse(compiled_correlations$pvalue < 0.01, '**',
+                                                 ifelse(compiled_correlations$pvalue < 0.05, '*', " ")))
+
+compiled_correlations$x <- unlist(compiled_correlations$x)
+compiled_correlations$y <- unlist(compiled_correlations$y)
+compiled_correlations$pvalue <- unlist(compiled_correlations$pvalue)
+head(compiled_correlations)
+save(compiled_correlations, file = "tables/confound_variable_correlations_with_pvalues.Rdata")
+```
+
+
+### t-test table for categorical vars
+```{r}
+
+# sex, group, scanner 
+fsdata6$scanner_confound <- ifelse(fsdata6$index_wave == 3, 1, 0)
+
+my_dataX <- data.frame(with(fsdata6, cbind(sex, GROUP, scanner_confound)))
+my_dataY <- data.frame(with(fsdata6, cbind(motion_ave_new, aseg_ave_rating, 
+                                 ICV, GMV, Amyg_ave,Hipp_ave)))
+
+# make an empty table.
+compiled_ttests <- data.frame(x = NA, y = NA, tvalue = NA, df = NA, pvalue = NA)
+
+# for each column in mydata...
+for (i in 1:ncol(my_dataX)){
+  print (i)
+  var1 <- my_dataX[i]
+  var1_name <- names(var1)
+     var1_test <- as.matrix(var1)
+  # get every other column in the dataframe...
+  for (j in 1:ncol(my_dataY)){
+    print (j)
+     var2 <-my_dataY[j]
+     var2_name <- names(var2)
+     var2_test <- as.matrix(var2)
+     # run the correlation and save the p-value...
+     t_value <- t.test(var2_test ~ var1_test)[1]
+     d_f <- t.test(var2_test ~ var1_test)[2]
+     p_value <- t.test(var2_test ~ var1_test)[3]
+     # keep the p-value 
+    row <- cbind(x=var1_name, y=var2_name, tvalue = t_value, df = d_f, pvalue = p_value)
+    compiled_ttests <- rbind(compiled_ttests, row)
+
+  }
+}
+compiled_ttests$sig_level <- ifelse(compiled_ttests$pvalue < 0.001, '***', 
+                                          ifelse(compiled_ttests$pvalue < 0.01, '**',
+                                                 ifelse(compiled_ttests$pvalue < 0.05, '*', " ")))
+head(compiled_ttests)
+nrow(compiled_ttests)
+compiled_ttests$x <- unlist(compiled_ttests$x)
+compiled_ttests$y <- unlist(compiled_ttests$y)
+compiled_ttests$tvalue <- unlist(compiled_ttests$tvalue)
+compiled_ttests$df <- unlist(compiled_ttests$df)
+compiled_ttests$pvalue <- unlist(compiled_ttests$pvalue)
+
+save(compiled_ttests, file = "tables/confound_variable_t-tests_with_pvalues.Rdata")
+```
+
+# plots 
+## whole brain measures
+### plot ICV by group and brain_age_yrs 
+PIs show faster decrease (aceelerated dev?) in ICV and GMV. 
+ICV peaks later than GMV.
+```{r,warnings=FALSE}
+
+ ggplot(fsdata6, aes(x = brain_age_yrs, y = ICV, color = GROUP)) +
+  geom_point( ) + theme_classic() + facet_grid(~ gender) +
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm') + 
+  stat_smooth() 
+
+```
+
+
+### plot GMV by group and brain_age_yrs 
+```{r,warnings=FALSE}
+
+ ggplot(fsdata6, aes(x = brain_age_yrs, y = GMV, color = GROUP)) +
+  geom_point( ) + theme_classic() + facet_grid(~gender)+
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm') + 
+  stat_smooth() 
+
+```
+
+
+## Motion 
+### plot motion with brain_age_yrs
+PIs have less motion!! and then overall decline with brain_age_yrs. 
+```{r, warnings = F}
+ ggplot(fsdata6, aes(x =brain_age_yrs, y = motion_ave_new, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm') + 
+  stat_smooth() 
+
+```
+
+### plot motion with GMV 
+no association here! 
+```{r, warnings = F}
+
+RA <- ggplot(fsdata6, aes(x =motion_ave_new, y = GMV, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm') + 
+  stat_smooth() 
+RA
+
+```
+
+### plot motion with ICV 
+```{r, warnings = F}
+
+RA <- ggplot(fsdata6, aes(x =motion_ave_new, y = ICV, color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm') + 
+  stat_smooth() 
+RA
+
+```
+
+### plot motion with amyg vol
+no relationship 
+```{r, warnings = F}
+ ggplot(fsdata6, aes(x =motion_ave_new, y = Left.Amygdala, 
+                             color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm')+ 
+  stat_smooth() 
+
+```
+
+### plot motion with R amyg vol
+no relationship 
+```{r, warnings = F}
+ ggplot(fsdata6, aes(x =motion_ave_new, y = Right.Amygdala, 
+                             color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm')+ 
+  stat_smooth() 
+
+```
+
+### plot motion with ASEG ratings 
+not necessarily correlated. 
+```{r, warnings = F}
+ ggplot(fsdata6, aes(x =motion_ave_new, y = aseg_ave_rating, 
+                             color = GROUP)) +
+  geom_jitter( alpha = 0.5) + theme_classic() +
+   stat_smooth(method = 'lm')
+ # geom_line(aes(group = IDENT_SUBID), alpha = 0.5) 
+
+```
+
+## Segmentation quality
+### plot aseg ratings with brain_age_yrs
+no relationship. 
+```{r, warnings = F}
+ ggplot(fsdata6, aes(x = brain_age_yrs, y = aseg_ave_rating, 
+                             color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm')
+
+```
+
+### plot aseg ratings with amyg. 
+no relationship. 
+```{r, warnings = F}
+ ggplot(fsdata6, aes(x = aseg_ave_rating, y = Left.Amygdala, 
+                             color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm')
+
+```
+
+### plot aseg ratings with R amyg. 
+no relationship. 
+```{r, warnings = F}
+ ggplot(fsdata6, aes(x = aseg_ave_rating, y =Right.Amygdala, 
+                             color = GROUP)) +
+  geom_point( ) + theme_classic() + 
+  geom_line(aes(group = IDENT_SUBID), alpha = 0.5) + stat_smooth(method = 'lm')
+
+```
+
+
+# test covariates for impt confounds 
+```{r, warnings = F}
+
+hist(fsdata6$brain_age_yrs)
+hist(fsdata6$ICV)
+hist(fsdata6$GMV)
+```
+
+## make scanner confound variable
+- nstead of index wave 
+```{r, warnings = F}
+
+fsdata6$scanner_confound <- with(fsdata6, as.factor(ifelse(index_wave == 1 | index_wave == 2, "scanner1", "scanner2")))
+summary(fsdata6$scanner_confound)
+```
+
+## are there volume differences by scanner?
+### ICV - yes
+GMV is *smaller* for scanner 2
+```{r}
+
+ ggplot(fsdata6, aes(x =scanner_confound, y = ICV, 
+                             color = GROUP)) +
+  geom_boxplot( ) + theme_classic() 
+
+```
+
+### GMV 
+GMV is *smaller* for scanner 2
+```{r}
+
+ ggplot(fsdata6, aes(x =scanner_confound, y = GMV, 
+                             color = GROUP)) +
+  geom_boxplot( ) + theme_classic() 
+
+```
+
+### Amyg  by scanner
+subcortical volume is *larger* even though ICV/GMV is *smaller* 
+```{r}
+ ggplot(fsdata6, aes(x =scanner_confound, y =Right.Amygdala, 
+                             color = GROUP)) +
+  geom_boxplot( ) + theme_classic() 
+
+```
+
+### Hipp by scanner
+subcortical volume is *larger* on scanner 2, even though ICV/GMV is *smaller* 
+```{r}
+ ggplot(fsdata6, aes(x =scanner_confound, y =Right.Hippocampus, 
+                             color = GROUP)) +
+  geom_boxplot( ) + theme_classic() 
+
+```
+
+### do we need to worry about data quality influencing volume measures?
+no, but ICV & GMV influence amyg. 
+```{r, warnings = F}
+pairs(my_data[,1:4])
+pairs(my_data[, 3:6])
+```
+
+### how strongly correlated are WBV and Amyg volume? 
+quite highly correlated!! 
+```{r, warnings = F}
+with(fsdata6, cor.test(GMV, Right.Amygdala))
+with(fsdata6, cor.test(GMV, Left.Amygdala))
+```
+
+### how strongly correlated are Hipp volume and Amyg volume? 
+quite highly correlated!! 
+```{r, warnings = F}
+with(fsdata6, cor.test(Amyg_ave, Hipp_ave))
+```
+
+## group differences in confound regressors 
+### GROUP and GMV 
+main effect of GROUP: PIs have smaller 
+ no effect of brain_age_yrs x group 
+```{r, warnings = F}
+summary(fsdata6$sex)
+fsdata6$index_wave <- as.factor(fsdata6$index_wave)
+library(nlme)
+
+GMV_test <- lme(GMV ~ brain_age_yrs* GROUP + gender + 
+                  index_wave, 
+                random = ~ 1 | IDENT_SUBID, data = fsdata6)
+
+anova(GMV_test)
+
+```
+
+huge effect of brain_age_yrs, group, sex and wave.
+```{r}
+GMV_test <- lme(GMV ~ brain_age_yrs + GROUP+ gender + 
+                  index_wave, 
+                random = ~ 1 | IDENT_SUBID, data = fsdata6)
+
+anova(GMV_test)
+```
+
+### GROUP and ICV 
+no  brain_age_yrs x group 
+```{r, warnings = F}
+
+ICV_test <- lme(ICV ~ brain_age_yrs*GROUP + gender+ 
+                  index_wave, random = ~ 1 | IDENT_SUBID, data = fsdata6)
+
+anova(ICV_test)
+```
+
+main effect of brain_age_yrs, group, gender, wave
+```{r, warnings = F}
+
+ICV_test <- lme(ICV ~ brain_age_yrs + GROUP + gender+ 
+                  index_wave, random = ~ 1 | IDENT_SUBID, data = fsdata6)
+
+anova(ICV_test)
+```
+
+### GROUP and motion
+definitely brain_age_yrs effects, and wave effects.
+*PI have LESS MOTION than COMPARISONS*. 
+```{r, warnings = F}
+
+motion_test <- lme(motion_ave_new ~ brain_age_yrs + GROUP + gender+ 
+                  index_wave, random = ~ 1 | IDENT_SUBID, data = fsdata6)
+
+anova(motion_test)
+plot(effect("GROUP", motion_test))
+```
+
+### GROUP and aseg quality. 
+nope!
+```{r, warnings = F}
+
+aseg_test <- lme(aseg_ave_rating ~ brain_age_yrs + GROUP + gender+ 
+                  index_wave, random = ~ 1 | IDENT_SUBID, data = fsdata6)
+
+anova(aseg_test)
+plot(effect("GROUP", aseg_test))
+```
+
+

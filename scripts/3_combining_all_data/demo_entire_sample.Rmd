@@ -1,0 +1,244 @@
+---
+title: "Demographics for entire sample"
+author: "Michelle.VanTieghem"
+date: " November 13, 2019"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+# Ntes
+making demographic tables and age chart
+
+```{r, include = F, warnings =F}
+source("../0_R_analysis_setup_file.R")
+
+```
+
+# load data 
+combined long dataset of all variables. 
+```{r}
+load("../../data/3_ALL_long_cort_symptoms_brain_structure_all_ages_2019-11-12.Rdata")
+
+```
+
+## filter out non-PI or comps 
+```{r}
+monster_SB <- subset(monster_SB, IDENT_SUBTYPE == 0 | IDENT_SUBTYPE == 1)
+nrow(monster_SB)
+monster_SB$GROUP <- as.factor(ifelse(monster_SB$IDENT_SUBTYPE == 0, "COMP", "PI"))
+summary(monster_SB$GROUP)
+
+monster_SB$GROUP.c <- ifelse(monster_SB$IDENT_SUBTYPE == 0, -.5, .5)
+range(monster_SB$age)
+
+```
+
+## keep data points with CORT OR BRAIN
+double checking, no data omitted here.
+```{r}
+demo_df <- monster_SB  %>% 
+ filter(!is.na(Hipp_ave) | !is.na(waking))
+nrow(demo_df)
+
+# should be 240 subjects with cort 
+check <- monster_SB %>%
+  filter(!is.na(waking))
+length(unique(check$IDENT_SUBID))
+```
+
+
+# make age- sampling graph 
+*use subjects who have cort or brain - and then symptoms subset will be smaller bc excluding ppl who are missing rCADS.
+## get min age for each subject. 
+```{r}
+min_age <- demo_df %>%
+  group_by(IDENT_SUBID) %>%
+  dplyr::summarize(min_age = min(age))
+for (i in 1:nrow(demo_df)){
+  sub <- demo_df$IDENT_SUBID[i]
+  demo_df$min_age[i] <- min_age$min_age[min_age$IDENT_SUBID== sub]
+}
+
+demo_df <- demo_df %>%
+  mutate(IDENT_SUBID.f = fct_reorder(IDENT_SUBID, min_age))
+min(demo_df$min_age)
+```
+
+
+## graph
+```{r}
+AgebyParticipant_cortbrain <-ggplot(demo_df,
+                         aes(colour=GROUP,
+                             y=IDENT_SUBID.f, x= age))+
+  geom_line(aes(group = IDENT_SUBID), size=.7, alpha = 0.7) + 
+  ylab("Participants") + xlab("Age") +
+  geom_point(size=1,  alpha = 0.7) + 
+  theme_classic() + my_colors + facet_grid (~ GROUP) +
+  theme(axis.line = element_line(colour = "black"),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position="none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) + 
+   scale_x_continuous(breaks = seq(4,19, by = 3), limits=c(3.8, 19)) 
+
+
+pdf(file = "tables/Manuscript_Figure_AgebyParticipant_all_data_cort_brain_4to19.pdf", width = 6, height =4)
+AgebyParticipant_cortbrain
+dev.off()
+
+AgebyParticipant_cortbrain
+```
+
+SAVE AS PWRPT
+```{r}
+#ppt_test2 <- read_pptx() %>%
+ # add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  #ph_with_vg(code = print(AgebyParticipant_cortbrain)) %>%
+  #print(target = "../../manuscript/figures_for_PNAS/powerpoint_vector_figures/Age_sampling.pptx")
+```
+
+# make demographic tables for manuscript
+## table 1: all subjects, and including PI-specific adoption info
+```{r}
+
+demo_df <- demo_df %>%
+  # to get 1 row per subject, use their min age row
+  filter(age == min_age) %>%
+  mutate(sex =  ifelse(!is.na(DEM_3_GENDER_CHILD.x), DEM_3_GENDER_CHILD.x, 
+                       DEM_3_GENDER_CHILD.y), 
+    country_origin = ifelse(GROUP == "COMP", NA,
+                     ifelse(IAI_1A_COUNTRYADOPT == "Russia" |IAI_1A_COUNTRYADOPT == "Kazakhstan" |
+                        IAI_1A_COUNTRYADOPT == "Russia" | IAI_1A_COUNTRYADOPT == "Ukraine" | IAI_1A_COUNTRYADOPT == "Azerbaijan" |IAI_1A_COUNTRYADOPT == "Slovak Republic" | IAI_1A_COUNTRYADOPT == "Hungary" |
+  IAI_1A_COUNTRYADOPT == "Romania" | IAI_1A_COUNTRYADOPT == "Belarus", "Eastern Europe", 
+  ifelse(IAI_1A_COUNTRYADOPT == "Guatamala" | IAI_1A_COUNTRYADOPT ==  "India", "other",
+         ifelse(IAI_1A_COUNTRYADOPT == " ", "unknown", "Asia")))))
+summary(as.factor(demo_df$country_origin))
+```
+
+## make actual table 
+```{r}
+
+demo_table1 <- demo_df %>%
+  group_by(GROUP) %>%
+  dplyr::summarize( N = n(), 
+             N_female = sum(sex),
+             perc_female = round(sum(sex)/n(), 2)*100,
+             mean_age = round(mean(age, na.rm =T),2),
+             median_age = round(median(age, na.rm = T), 2),
+             sd_age = round(sd(age, na.rm = T),2),
+             min_age = round(min(age, na.rm = T),2),
+             max_age = round(max(age, na.rm = T),2),
+             mean_IQ = round(mean(WASI_FSIQ, na.rm = T), 2), 
+             sd_IQ = round(sd(WASI_FSIQ, na.rm = T), 2),
+             min_IQ = round(min(WASI_FSIQ, na.rm = T), 2),
+             max_IQ = round(max(WASI_FSIQ, na.rm = T), 2),
+             mean_age_placed = round(mean(IAI_3_AGEORPH, na.rm = T), 2),
+             median_age_placed = round(median(IAI_3_AGEORPH, na.rm = T), 2),
+             sd_age_placed = round(sd(IAI_3_AGEORPH, na.rm= T), 2),
+             min_age_placed = round(min(IAI_3_AGEORPH, na.rm= T), 2),
+             max_age_placed = round(max(IAI_3_AGEORPH, na.rm= T), 2),
+      
+             mean_age_adopted = round(mean(IAI_7_AGEADOPT, na.rm = T), 2),
+             median_age_adopted = round(median(IAI_7_AGEADOPT, na.rm = T), 2),
+
+             sd_age_adopted = round(sd(IAI_7_AGEADOPT, na.rm= T), 2),
+             min_age_adopted = round(min(IAI_7_AGEADOPT, na.rm= T), 2),
+             max_age_adopted = round(max(IAI_7_AGEADOPT, na.rm= T), 2),
+             N_asian_origin = sum(ifelse(country_origin == "Asia", 1, 0), na.rm = T),
+            N_eastern_europ_origin = sum(ifelse(country_origin == "Eastern Europe", 1, 0), na.rm = T),
+            N_other = sum(ifelse(country_origin == "other", 1, 0), na.rm = T), 
+            N_unknown = sum(ifelse(country_origin == "unknown", 1, 0), na.rm = T),
+             Perc_Asian_origin = round(sum(ifelse(country_origin == "Asia", 1, 0))/n(),2)*100,
+             Perc_Eastern_europ_origin = round(sum(ifelse(country_origin == "Eastern Europe", 1, 0))/n(),2)*100,
+             Perc_other = round(sum(ifelse(country_origin == "other", 1, 0))/n(),2)*100,
+              Perc_unknown = round(sum(ifelse(country_origin == "unknown", 1, 0))/n(),2)*100)
+# flip rows so that PIs are on top.
+demo_table <- rbind(demo_table1[2,], demo_table1[1,])
+
+## save 
+save(demo_table, file = "tables/new_demo_table_by_subj.Rdata")
+```
+
+## add t-tests 
+```{r}
+# SEX 
+sex.ttest <- t.test(sex ~ GROUP, data = demo_df)
+# AGE 
+age.ttest <- t.test(min_age ~ GROUP, data = demo_df)
+# IQ 
+IQ.ttest <- t.test(WASI_FSIQ ~ GROUP, data = demo_df)
+
+
+save(sex.ttest, age.ttest, IQ.ttest, file = "tables/demo_ttest_group_diff_entier_sample.rda")
+```
+
+
+
+## table 2: breakdown by wave of cort, and brain, by WAVE, side by side panels.
+```{r, include = F, eval = F}
+demo_waking <- demo_df %>%
+  filter(!is.na(waking)) %>%
+  group_by(GROUP, index_wave) %>%
+  dplyr::summarize(N = n(), 
+            N_female = sum(sex),
+             perc_female = round(sum(sex)/n(), 2)*100,
+             mean_age = round(mean(age, na.rm =T),2),
+             sd_age = round(sd(age, na.rm = T),2), 
+            min_age = round(min(age, na.rm = T), 2), 
+            max_age = round(max(age, na.rm = T), 2))
+demo_waking
+
+demo_brain <- demo_df %>%
+    filter(!is.na(Hipp_ave)) %>%
+   group_by(GROUP, index_wave) %>%
+   dplyr::summarize(N = n(), 
+             N_female = sum(sex),
+             perc_female = round(sum(sex)/n(), 2)*100,
+             mean_age = round(mean(age, na.rm =T),2),
+             sd_age = round(sd(age, na.rm = T),2), 
+            min_age = round(min(age, na.rm = T), 2), 
+            max_age = round(max(age, na.rm = T), 2))
+
+demo_brain
+cort_brain_demo_by_wave <- cbind(demo_waking, demo_brain) %>%
+  dplyr::select(-GROUP1, -index_wave1)
+save(cort_brain_demo_by_wave, file = "tables/new_cort_brain_demo_by_wave.Rdata")
+```
+
+
+
+sanity check: some subjects without cort did have brain? YES.
+these are cumulative data points in long format across waves
+
+```{r}
+
+demo_check <- demo_df %>%
+  filter(is.na(waking) & !is.na(Hipp_ave)) %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(N = n())
+
+demo_check
+```
+
+
+sanity check: some subjects without brain did have cort? YES
+these are cumulative data points in long format across waves
+```{R}
+
+demo_check <- demo_df %>%
+  filter(!is.na(waking) & is.na(Hipp_ave)) %>%
+  group_by(GROUP) %>%
+  dplyr::summarize(N = n())
+
+demo_check
+```
