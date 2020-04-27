@@ -12,6 +12,15 @@ output:
   pdf_document:
     toc: yes
 ---
+
+# NOTES 
+- merging in puberty and medicine covarriates from master 
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+```
+
+
 # load data
 ```{r}
 load(file="../../../data/1_cort_data/1B_long_cort_added_age_intervals.Rdata")

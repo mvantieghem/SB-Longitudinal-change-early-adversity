@@ -13,18 +13,19 @@ output:
     toc: yes
 ---
 
-# calculate outliers for longitudinal cortisol 
-We want to calculate outliers by Group, Wave, day & time of day
-in other words, subset the data by index20 (each time point per sub) 
-and then split into PI and comparisons
-based on those groups (40) calculate outliers 3SD beyond mean. 
+# NOTES 
+## calculate outliers for longitudinal cortisol  \
+We want to calculate outliers by Group, Wave, day & time of day \
+in other words, subset the data by index20 (each time point per sub)  \
+and then split into PI and comparisons \
+based on those groups (40) calculate outliers 3SD beyond mean. \
 
-# updated May 2018 
-to account for the fact that we will be removing the youngest kids, and oldest kids, to balance groups! 
-remove outliers AFTER that fact.
+## updated May 2018 
+to account for the fact that we will be removing the youngest kids, and oldest kids, to balance groups! \
+remove outliers AFTER that fact. \
 
-# updated june 2018:
-make sure you're using corrected_cort_age_yrs and cort_values_fixed 
+## updated june 2018:
+make sure you're using corrected_cort_age_yrs and cort_values_fixed  \
 
 
 ```{r, warnings = F, include = F, message = F}

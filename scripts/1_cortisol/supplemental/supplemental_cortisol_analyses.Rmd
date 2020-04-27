@@ -14,6 +14,7 @@ output:
 ---
 
 
+
 ```{r, warnings = F, include = F, message = F}
 source("../../0_R_analysis_setup_file.R")
 
@@ -149,7 +150,93 @@ cort_ave_days_m$GROUP <- as.factor(ifelse(cort_ave_days_m$GROUP.n == 0, "COMP", 
 ```
 
 
-# 1) SEX EFFECTS 
+# 1)  check retention stats 
+## prep data 
+```{r, warning = F, message = F}
+# get everyone's baseline info 
+baseline_demo <- cort_merge8 %>% 
+    filter((corrected_cort_age_yrs == min_age) & (index20.n == min_index20)) %>%
+   select(IDENT_SUBID, GROUP, corrected_cort_age_yrs, sex, J.RCADS_Total_Score_T_new)
+nrow(baseline_demo)
+
+# get number f waves per subject
+follow_up_waves <- cort_merge8 %>%
+  group_by(IDENT_SUBID, index_wave) %>%
+# first just find out who has cort for a given wave
+  dplyr::summarize(cort_exists = mean(cort_values_fixed_no_outliers, na.rm = T)) %>%
+  # then make a wide df so we have each wave of cort as a column, 
+  spread(index_wave, cort_exists) %>%
+  rename(wave1 = '1', wave2 = '2', wave3 = '3') %>%
+  mutate(wave1 = ifelse(!is.na(wave1), 1, 0), 
+         wave2 = ifelse(!is.na(wave2), 1, 0), 
+         wave3 = ifelse(!is.na(wave3), 1, 0)) %>%
+  # now add counts of how many waves each subject has 
+  mutate(total_waves = as.factor((wave1 + wave2 + wave3)))
+
+# check that therer is a single row per subj
+identical(nrow(follow_up_waves), length(unique(follow_up_waves$IDENT_SUBID)))
+
+# this provides N for subs with 1,2,3 waves.
+summary(as.factor(follow_up_waves$total_waves))
+
+# combine with baseline demo
+retention_Df <- merge(baseline_demo, follow_up_waves, by = "IDENT_SUBID") %>%
+  mutate(GROUP = ifelse(GROUP == "PI", 1, 0))
+
+summary(retention_Df$GROUP)
+```
+
+## ANOVA to test difference between baseline, 2 waves, 3 waves 
+
+```{r}
+
+# testing age differernce
+summary(age_test <- lm(corrected_cort_age_yrs ~ total_waves, data = retention_Df))
+Anova_age_test <- data.frame(Anova(age_test, type = "III"))
+
+# testing sex difference
+summary(sex_test <- glm (sex ~ total_waves,
+                         family = binomial, 
+                         data = retention_Df))
+Anova_sex_test <- data.frame(Anova(sex_test, type = "III"))
+
+# trend difference...
+summary(group_test <- glm(GROUP ~ total_waves, 
+                  family = binomial, 
+                  data = retention_Df))
+Anova_group_test <- data.frame(Anova(group_test, type = "III"))
+
+save(Anova_age_test, Anova_sex_test, Anova_group_test, file = "model_output/Retention_anova_tests.rda")
+```
+
+## T-test for baseline-only vs. follow-up 
+```{r}
+
+retention_Df$one_vs_more_waves <- as.factor(ifelse(retention_Df$total_waves == 1, 1, 2))
+summary(retention_Df$one_vs_more_waves)
+
+age_test <- lm(corrected_cort_age_yrs ~ one_vs_more_waves, data = retention_Df)
+summary(age_test)
+
+# testing sex difference
+sex_test <- lm (sex ~ one_vs_more_waves, data = retention_Df)
+summary(sex_test)
+
+# SIG difference!
+group_test <- glm(GROUP ~ one_vs_more_waves, 
+                  family = binomial, 
+                  data = retention_Df)
+summary(group_test)
+
+# more liekly that PIs came back 
+effect_df <- data.frame(effect("one_vs_more_waves", group_test))
+ggplot(effect_df, aes(x = one_vs_more_waves, y = fit)) +
+  geom_bar(stat = "identity", alpha = 0.5) + ylim(0,1) + ylab("GROUP") + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.5)
+```
+
+
+# 2) SEX EFFECTS 
 
 ## set up data
 ```{r}
@@ -244,7 +331,7 @@ sex_waking_posthoc_slopes
 save(sex_waking_posthoc_slopes, file = "model_output/sexXage_waking_linear_posthoc_age_slopes.Rdata")
 ```
 
-# 2) Age of adoption (continuous, logged)
+# 3) Age of adoption (continuous, logged)
 
 ## set up  variables, automatically excluding COMPS
 ```{r}
@@ -255,7 +342,29 @@ adopt_vars_cort_df <- waking_cort_df %>%
 summary(adopt_vars_cort_df$GROUP)
 ```
 
-## make wide df with 1 subject per row for descriptives and for plotting later
+## make wider df with 1 row per subject per wave for plotting
+```{r}
+adopt_vars_wide_by_wave <- adopt_vars_cort_df %>%
+  filter( GROUP == "PI") %>%
+  group_by(IDENT_SUBID, index_wave) %>%
+  dplyr::summarize(IAI_3_AGEORPH = mean(IAI_3_AGEORPH, na.rm = T),
+           IAI_7_AGEADOPT = mean(IAI_7_AGEADOPT, na.rm = T),
+           duration_adversity = mean(duration_adversity, na.rm = T),
+           corrected_cort_age_yrs = mean(corrected_cort_age_yrs, na.rm = T),
+           cort_use = mean(cort_use, na.rm = T), 
+           sex = mean(DEM_3_GENDER_CHILD), 
+           batch = mean(batch)) %>%
+  mutate(age_adopt_log = log(IAI_7_AGEADOPT + 0.4),
+         age_adopt_sqrt = sqrt(IAI_7_AGEADOPT))
+
+# number of rows 
+nrow(adopt_vars_wide_by_wave) 
+# number of subjects
+length(unique(adopt_vars_wide_by_wave$IDENT_SUBID))
+
+```
+
+## make wide df with 1 subject per row for descriptives 
 ```{r}
 #first you need to make a 1 row per subj df
 adopt_vars_wide <- adopt_vars_cort_df %>%
@@ -307,13 +416,26 @@ N_for_adoption_waking_table
 save(N_for_adoption_waking_table, file = "tables/adoption_N_missing_table_cort_sample.Rdata")
 ```
 
+## remove subjects with no adoption data 
+```{r}
+# using age orph as the exclusion variable, because there is 1 subject who has age ofo adoption but no other info and that's not very helpful! 
+adopt_vars_wide <- adopt_vars_wide %>%
+  filter(!is.na(IAI_3_AGEORPH))
+
+adopt_vars_cort_df <- adopt_vars_cort_df %>%
+  filter(!is.na(IAI_3_AGEORPH))
+
+sum(is.na(adopt_vars_cort_df$IAI_7_AGEADOPT))
+length(unique(adopt_vars_cort_df$IDENT_SUBID))
+```
+
 
 ## correlations between adoption variables and age/sex
 relevant: age and batch are correlated.
 ```{r}
 
 cor_table_adoption <- adopt_vars_wide %>%
- dplyr:: select(IAI_3_AGEORPH, IAI_7_AGEADOPT,  duration_adversity, corrected_cort_age_yrs, sex, batch) %>%
+ dplyr:: select(IAI_3_AGEORPH, IAI_7_AGEADOPT,corrected_cort_age_yrs, sex, batch) %>%
   na.omit(.) %>%
   correlation
 cor_table_adoption_formatted <- summary(cor_table_adoption)
@@ -321,23 +443,48 @@ cor_table_adoption_formatted
 save(cor_table_adoption_formatted, file = "tables/adoption_corr_table_beautiful_formatting.Rdata")
 ```
 
+## check cortisol for outliers in PI sub-sample
+```{r}
+hist(adopt_vars_cort_df$cort_use)
+
+# get means and SDs by wave
+cort_table <- adopt_vars_cort_df %>%
+  group_by(index_wave) %>%
+  dplyr::summarize(mean = mean(cort_use), 
+            sd = sd(cort_use), 
+            upper = mean + 3*sd, 
+            lower = mean - 3*sd)
+
+# calculate outliers by wave 
+adopt_vars_cort_df <- adopt_vars_cort_df %>%
+  group_by(index_wave) %>%
+  mutate(cort_outlier = ifelse (index_wave == 1 & cort_use > cort_table$upper[cort_table$index_wave == 1], 1, 
+               ifelse(index_wave == 2 & cort_use > cort_table$upper[cort_table$index_wave == 2], 1, 
+                ifelse(index_wave == 3 & cort_use > cort_table$upper[cort_table$index_wave == 3], 1, 0 )))) 
+
+# count outliers 
+cort_outlier_table <- adopt_vars_cort_df %>%
+  dplyr::summarize(n_outlier = sum(cort_outlier))
+
+cort_outlier_table
+
+# exclude outliers 
+adopt_vars_df <- adopt_vars_cort_df %>% 
+  filter(cort_outlier != 1)
+```
 
 ## check age of placement: log transform
 ```{r}
 hist(adopt_vars_cort_df$IAI_3_AGEORPH)
 
 #log-transforming... doesn't quite help but better
-
 shapiro.test(adopt_vars_cort_df$IAI_3_AGEORPH)
 shapiro.test(log(adopt_vars_cort_df$IAI_3_AGEORPH + 0.4))
-shapiro.test(sqrt(adopt_vars_cort_df$IAI_3_AGEORPH))
 
 # log transform, but change 0 to 0.4 so we don't have negative values.
-adopt_vars_cort_df$age_placed_log <- log(adopt_vars_cort_df$IAI_3_AGEORPH  + 1)
+adopt_vars_cort_df$age_placed_log <- log(adopt_vars_cort_df$IAI_3_AGEORPH  + 0.4)
 hist(adopt_vars_cort_df$age_placed_log)
 
-adopt_vars_cort_df$age_placed_sqrt <- sqrt(adopt_vars_cort_df$IAI_3_AGEORPH )
-hist(adopt_vars_cort_df$age_placed_sqrt)
 ```
 
 ## check age of adoption: log transform
@@ -345,34 +492,35 @@ hist(adopt_vars_cort_df$age_placed_sqrt)
 hist(adopt_vars_cort_df$IAI_7_AGEADOPT)
 
 #log-transforming... doesn't quite help but better
-
 shapiro.test(adopt_vars_cort_df$IAI_7_AGEADOPT)
 shapiro.test(log(adopt_vars_cort_df$IAI_7_AGEADOPT))
+
 shapiro.test(sqrt(adopt_vars_cort_df$IAI_7_AGEADOPT))
 
 # log transform, but change 0 to 0.4 so we don't have negative values.
-adopt_vars_cort_df$age_adopt_log <- log(adopt_vars_cort_df$IAI_7_AGEADOPT + 1)
-hist(adopt_vars_cort_df$age_adopt_log)
+adopt_vars_cort_df <- adopt_vars_cort_df %>%
+  mutate(age_adopt_log = log(IAI_7_AGEADOPT + 0.4), 
+         age_adopt_sqrt = sqrt(IAI_7_AGEADOPT))
 
-adopt_vars_cort_df$age_adopt_sqrt <- sqrt(adopt_vars_cort_df$IAI_7_AGEADOPT)
+hist(adopt_vars_cort_df$age_adopt_log)
 hist(adopt_vars_cort_df$age_adopt_sqrt)
+
 ```
 
- identify extreme cases 
+## check for outliers in age adopted
 there are no outliers after log-transformation! 
 ```{r}
 
 # if the value is > 3 SD from the mean, then change value to 3SD from mean.
 adopt_vars_cort_df <- adopt_vars_cort_df %>%
-  mutate(age_adopt_log_outlier = ifelse(age_adopt_log > 3*sd(age_adopt_log, na.rm = T) + mean(age_adopt_log, na.rm = T),1,0))
-    #age_adopt_log_windsorized = ifelse(age_adopt_log_outlier == 1,
-     #                                       3*sd(age_adopt_log, na.rm = T) + mean(age_adopt_log, na.rm = T), age_adopt_log))
+  mutate(age_adopt_log_outlier = ifelse(age_adopt_log > 3*sd(age_adopt_log, na.rm = T) 
+                                        + mean(age_adopt_log, na.rm = T),1,0))
 
 summary(adopt_vars_cort_df$age_adopt_log_outlier)
 ```
 
 ## linear models with all data 
-### main effect of log age of adoption: TREND.
+### main effect of log age of adoption: SIG.
 ```{r}
 logageadopt_linear_mod <- lmer(cort_use ~ 
                           age_adopt_log + corrected_cort_age_yrs.c + 
@@ -385,7 +533,7 @@ summary(logageadopt_linear_mod)
 save(logageadopt_linear_mod, file = "model_output/logageadopt_linear_model_results.Rdata")
 ```
 
-### main effect of log age of adoption WITH age placed: NS. 
+### main effect of log age of adoption WITH age placed: SIG
 ```{r}
 logageadopt_logageplaced_linear_mod <- lmer(cort_use ~ 
                           age_adopt_log + corrected_cort_age_yrs.c + 
@@ -398,8 +546,112 @@ summary(logageadopt_logageplaced_linear_mod)
 save(logageadopt_logageplaced_linear_mod, file = "model_output/logageadopt_logageplaced_linear_model_results.Rdata")
 ```
 
+### plot of these new significant effects...
+```{r}
 
-# 3) Testosterone
+effect_df <- data.frame(effect("age_adopt_log", logageadopt_logageplaced_linear_mod))
+
+effect_plot <- ggplot(data = effect_df, aes(x = age_adopt_log, y = fit)) + 
+  geom_line() + geom_ribbon(aes(ymin = lower, ymax = upper), fill = dark_blue, alpha = 0.2) + 
+  geom_point(data = adopt_vars_wide_by_wave, aes(x = age_adopt_log, y = cort_use), 
+             color = dark_blue, alpha = 0.5, width = 0.05)  + 
+  geom_line(data = adopt_vars_wide_by_wave, aes(x = age_adopt_log, y = cort_use, 
+                  group = IDENT_SUBID), color = dark_blue, alpha = 0.2) +
+  ylab("Waking cortisol") + xlab ("Age Adopted (log-transformed)")
+effect_plot
+
+ggsave(effect_plot, file = "figures/waking_cort_by_age_adopt_log.pdf", width = 6, height = 4)
+```
+
+### main effect of sqrt age of adoption: TREND.
+```{r}
+sqrtageadopt_linear_mod <- lmer(cort_use ~ age_adopt_sqrt + corrected_cort_age_yrs.c + 
+                           index_wave.c + index_day.c + batch.c + 
+                     sex.centered + age_placed_log + meds.c +
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                      data = adopt_vars_cort_df)
+summary(sqrtageadopt_linear_mod)
+
+save(sqrtageadopt_linear_mod, file = "model_output/sqrtageadopt_linear_model_results.Rdata")
+```
+
+```{r}
+
+effect_df <- data.frame(effect("age_adopt_sqrt", sqrtageadopt_linear_mod))
+
+effect_plot <- ggplot(data = effect_df, aes(x = age_adopt_sqrt, y = fit)) + 
+  geom_line() + geom_ribbon(aes(ymin = lower, ymax = upper), fill = dark_blue, alpha = 0.2) + 
+  geom_jitter(data = adopt_vars_wide_by_wave, aes(x = age_adopt_sqrt, y = cort_use), 
+             color = dark_blue, alpha = 0.5, width = 0.05)  + 
+  geom_line(data = adopt_vars_wide_by_wave, aes(x = age_adopt_sqrt, y = cort_use, 
+                  group = IDENT_SUBID), color = dark_blue, alpha = 0.2) +
+  ylab("Waking cortisol") + xlab ("Age Adopted (sqrt-transformed)")
+effect_plot
+
+ggsave(effect_plot, file = "figures/waking_cort_by_age_adopt_sqrt.pdf", width = 6, height = 4)
+```
+
+### main effect of RAW age of adoption: TREND.
+```{r}
+ageadopt_linear_mod <- lmer(cort_use ~ IAI_7_AGEADOPT + corrected_cort_age_yrs.c + 
+                           index_wave.c + index_day.c + batch.c + 
+                    meds.c + sex.centered + #age_placed_log 
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                      data = adopt_vars_cort_df)
+summary(ageadopt_linear_mod)
+
+save(ageadopt_linear_mod, file = "model_output/ageadopt_linear_model_results.Rdata")
+```
+
+### main effect of RAW age of adoption with RAW age placed: SIG.
+```{r}
+ageadopt_linear_mod <- lmer(cort_use ~ IAI_7_AGEADOPT + corrected_cort_age_yrs.c + 
+                           index_wave.c + index_day.c + batch.c + 
+                    meds.c + sex.centered +IAI_3_AGEORPH +
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                      data = adopt_vars_cort_df)
+summary(ageadopt_linear_mod)
+
+save(ageadopt_linear_mod, file = "model_output/ageadopt_linear_model_results.Rdata")
+```
+
+```{r}
+
+effect_df <- data.frame(effect("IAI_7_AGEADOPT", ageadopt_linear_mod))
+
+effect_plot <- ggplot(data = effect_df, aes(x = IAI_7_AGEADOPT, y = fit)) + 
+  geom_line() + geom_ribbon(aes(ymin = lower, ymax = upper), fill = dark_blue, alpha = 0.2) + 
+  geom_point(data = adopt_vars_wide_by_wave, aes(x = IAI_7_AGEADOPT, y = cort_use), 
+             color = dark_blue, alpha = 0.5)  + 
+  geom_line(data = adopt_vars_wide_by_wave, aes(x = IAI_7_AGEADOPT, y = cort_use, 
+                  group = IDENT_SUBID), color = dark_blue, alpha = 0.2) +
+  ylab("Waking cortisol") + xlab ("Age Adopted (months)")
+effect_plot
+
+ggsave(effect_plot, file = "figures/waking_cort_by_age_adopt_raw.pdf", width = 6, height = 4)
+```
+
+### age adopt x age split (Age 13): NS
+```{r}
+adopt_vars_cort_df <- adopt_vars_cort_df %>%
+  mutate(age_split = ifelse(corrected_cort_age_yrs < 13, "<13", ">=13"))
+
+ageadopt_agesplit_mod <- lmer(cort_use ~ age_adopt_log*age_split +
+                              #corrected_cort_age_yrs.c + 
+                           index_wave.c + index_day.c + batch.c + 
+                    meds.c + sex.centered + age_placed_log 
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                      data = adopt_vars_cort_df)
+summary(ageadopt_agesplit_mod)
+anova(ageadopt_agesplit_mod, method = "III")
+
+save(ageadopt_linear_mod, file = "model_output/ageadopt_agesplit_model_results.Rdata")
+```
+
+### Are piecewise effects moderated by age adopted?
+This is hard to test... 
+
+# 4) Testosterone
 using sex-normed testosterone, generated in 2A cleaning script. 
 ```{r}
 waking_cort_df$testos_normed <- waking_cort_df$testos_cleaned_log_wave_ave_gender_normed
@@ -494,4 +746,67 @@ agexgroup_testos_linear_waking <- lmer(cort_use ~
                      + (1 + index_wave.c | IDENT_SUBID), data = waking_cort_df)
 summary(agexgroup_testos_linear_waking)
 save(agexgroup_testos_linear_waking, file = "model_output/agexgroup_testos_waking_linear_model_results.Rdata")
+```
+
+
+## 5) Power analysis of main model 
+
+### observed power analysis
+```{r}
+# load model object 
+load("../manuscript/model_output/waking_cort_piecewise_model.Rdata")
+model <- data.frame(summary(lmer_piecewise_waking)$coefficients)
+model$Coefficients <- rownames(model)
+
+# run 'observed power" calculation for your model with niall's function
+pow2 <- function (beta, se) {
+  z1mb = abs(beta/se) - 1.96
+  pow = (pnorm(abs(beta/se) - 1.96, mean = 0, sd = 1, lower.tail = TRUE))
+  result <- list("power"= pow)
+  return(result)
+}
+
+
+obs_pwr_groupxage1 <- pow2(beta = model$Estimate[model$Coefficients == "GROUPPI:age1"], se = model$Std..Error[model$Coefficients == "GROUPPI:age1"])
+
+obs_pwr_groupxage2 <- pow2(beta = model$Estimate[model$Coefficients == "GROUPPI:age2"], se = model$Std..Error[model$Coefficients == "GROUPPI:age2"])
+
+obs_pwr_groupxage1
+obs_pwr_groupxage2
+
+save(obs_pwr_groupxage1, obs_pwr_groupxage2, file = "model_output/obs_pwr_cort_waking_piecewise.rda")
+```
+
+### power analysis for future replication
+
+Question: want to know how many subjects I need, or more within-subject time points, to reach 80% power for groupxage1 
+```{r, include = F, eval = F}
+# first generate fake data with expand.grid.
+# let's say we have the same Number of subjects (240)
+# but all with 3 data points at ages 4, 8, 12 for estimating groupage1
+group <- c(0,1)
+age1 <- c(4, 8, 12)
+groupage1 <- age1*group
+SUBID <- 1:240
+#index_wave <- c(1,2,3) # don't need this, because repeated measures in age.
+
+new_df <- expand.grid(groupage1 = groupage1, SUBID = SUBID)
+nrow(new_df)
+
+# Specify some fixed and random parameters --> from orig model. 
+b <- c(model$Estimate[model$Coefficients == "(Intercept)"], model$Estimate[model$Coefficients == "GROUPPI:age1"]) # fixed intercept and slope
+V1 <- 24.462 # random intercept variance
+#V2 <- matrix(c(0.5,0.05,0.05,0.1), 2) # random intercept and slope variance-covariance matrix
+#can't figure out how to get this.
+s <- summary(lmer_piecewise_waking)$sigma  # residual standard deviation
+#uild a model object
+#Use the makeLmer or makeGlmer function to build an artificial lme4 object.
+
+model1 <- makeLmer(y ~ groupage1 + (1 | SUBID), 
+                   fixef=b, VarCorr=V1, sigma=s, data=new_df)
+
+#Now we have “pilot” models, which can be used with simr.
+
+powerSim(model1, nsim=50)
+
 ```

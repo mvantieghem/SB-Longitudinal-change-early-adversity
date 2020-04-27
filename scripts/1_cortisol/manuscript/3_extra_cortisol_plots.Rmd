@@ -1,0 +1,1013 @@
+---
+title: "longitudinal cort analysis: extra plots"
+author: "Michelle.VanTieghem"
+date: "Feb 2020" 
+output:
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+---
+
+# Notes:
+loading model results from script #2 and plotting results in different ways!
+
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
+
+```
+
+# first, get results from analysis into this document
+```{r, warnings = F, include = F, message = F, echo = F}
+
+# If sourcing from an .Rmd file, run this instead: 
+ksource <- function(x, ...) {
+  library(knitr)
+  source(purl(x, output = tempfile()), ...)
+}
+# source model results directly from R markdown file 
+
+ksource("2_Cortisol_age_group_analysis.Rmd")
+
+# load the right piecewise bp, because multiple versions
+load("model_output/cort_optimize_piecewise_breakpoint.Rdata")
+bp <- optimize_piecewise_bp[1]
+
+
+# load the right piecewise bp, because multiple versions
+load("model_output/waking_optimize_piecewise_breakpoint.Rdata")
+waking_bp <- optimize_piecewise_bp[1]
+
+
+# change waking to morning and setting morning as reference of factor
+cort_ave_days_m$time_of_day <- as.factor(ifelse(cort_ave_days_m$time_of_day == "Waking", "Morning", "Evening"))
+cort_ave_days_m$time_of_day <- relevel(cort_ave_days_m$time_of_day, "Morning")
+summary(cort_ave_days_m$time_of_day)
+```
+
+
+# diurnal cortisol omnibus model 
+
+## plot waking and evening separately
+```{r}
+# make specific new data for COMP age effect.
+agelist <- seq(4, 19, 0.5)
+effect_df <- data.frame(corrected_cort_age_yrs = agelist, 
+                    time_of_day = c(rep("Waking", length(agelist)), rep("Evening", length(agelist))), 
+                    GROUP = c(rep("COMP", 2*length(agelist)), rep("PI", 2*length(agelist))), 
+                    index_day = 0, batch.c = 0, 
+       sex.centered = 0, meds.c = 0, index_wave.c = 0, index_day.c = 0)
+nrow(effect_df)
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~  GROUP*corrected_cort_age_yrs*time_of_day + 
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c, data = effect_df) 
+
+cis <- diag(fit.mat %*% tcrossprod(vcov(lmer_linear), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+effect_df$cort_Y <- predict(lmer_linear, effect_df, re.form = NA)
+effect_df$cort_lwr <- effect_df$cort_Y-(1.96*sqrt(cis))
+effect_df$cort_upr <- effect_df$cort_Y+ (1.96*sqrt(cis))
+
+effect_df <- effect_df %>%
+  mutate(# change naming from waking cort to morning 
+        time_of_day = as.factor(ifelse(time_of_day == "Waking", "Morning", "Evening")), 
+# but they are ordered alphabetaically, so need to set morningn as baseline.
+        time_of_day = relevel(time_of_day, "Morning"))
+```
+
+### ggplot 
+```{r}
+
+cort_linear_PI_plot <- ggplot(effect_df, aes(x = corrected_cort_age_yrs, y = cort_Y, color = GROUP)) + 
+  geom_line (size = 1) + 
+  my_colors + my_colors2 +facet_grid(~time_of_day) + 
+  ylab("Cortisol Values (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = cort_ave_days_m,
+             aes(x= corrected_cort_age_yrs, y= cort_use, 
+                                         color = GROUP), size=1, alpha = 0.15)+ 
+  geom_line(data = cort_ave_days_m,
+            aes(x = corrected_cort_age_yrs, y = cort_use, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.15) + 
+ scale_x_continuous(breaks = seq(4,20.5, by = 3), limits=c(4.0, 20.5)) +
+  theme_classic () + 
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) 
+cort_linear_PI_plot
+pdf("figures/cort_linear_model_plot_overlapped.pdf", width = 6, height = 4)
+cort_linear_PI_plot
+dev.off()
+
+#pdf("figures/cort_linear_model_plot_overlapped_CI.pdf", width = 6, height = 4)
+#cort_linear_PI_plot + geom_ribbon(data = effect_df, aes(ymin = cort_lwr, ymax =cort_upr, fill = GROUP),  alpha = .1, color = NA) 
+#dev.off()
+
+```
+
+## plot difference between morning - evening
+
+get confidence intervals for waking - evening
+```{r}
+data_use$time_of_day <- relevel(data_use$time_of_day, "Evening")
+
+cort_sd_age <- sd(data_use$corrected_cort_age_yrs)
+cort_mean_age <- mean(data_use$corrected_cort_age_yrs)
+
+
+TOD_diff_comp_minage <- data.frame(GROUP = "COMP", age = 4, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs", 4, lmer_linear))
+
+TOD_diff_comp_1agelwr <- data.frame(GROUP = "COMP", age = cort_mean_age - 1*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs", cort_mean_age - 1*cort_sd_age, lmer_linear))
+
+TOD_diff_comp_meanage <- data.frame(GROUP = "COMP", age = cort_mean_age, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs", cort_mean_age, lmer_linear))
+
+TOD_diff_comp_1ageupr <- data.frame(GROUP = "COMP", age = cort_mean_age + 1*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs", cort_mean_age + 1*cort_sd_age, lmer_linear))
+
+TOD_diff_comp_2ageupr <- data.frame(GROUP = "COMP", age = cort_mean_age + 2*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs", cort_mean_age + 2*cort_sd_age, lmer_linear))
+
+### PI 
+data_use$GROUP_PI <- ifelse(data_use$GROUP == "COMP", 1, 0)
+data_use$corrected_cort_age_yrs.c <- data_use$corrected_cort_age_yrs- mean(data_use$corrected_cort_age_yrs, na.rm = T)
+lmer_linear_PI_ref <- lmer(cort_use ~ 
+                           GROUP_PI * time_of_day*corrected_cort_age_yrs.c +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c #, random = ~ 1 + time_of_day| IDENT_SUBID,
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                   data = data_use)
+summary(lmer_linear_PI_ref)
+
+TOD_diff_PI_minage <- data.frame(GROUP = "PI", age = 4, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs.c", -6.5, lmer_linear_PI_ref))
+
+TOD_diff_PI_1agelwr <- data.frame(GROUP = "PI", age = cort_mean_age - 1*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs.c", -1*cort_sd_age, lmer_linear_PI_ref))
+
+TOD_diff_PI_meanage <- data.frame(GROUP = "PI", age = cort_mean_age, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs.c", 0, lmer_linear_PI_ref))
+
+
+TOD_diff_PI_1ageupr <- data.frame(GROUP = "PI", age = cort_mean_age + 1*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs.c", 1*cort_sd_age, lmer_linear_PI_ref))
+
+TOD_diff_PI_2ageupr <- data.frame(GROUP = "PI", age = cort_mean_age + 2*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "corrected_cort_age_yrs.c",  2*cort_sd_age, lmer_linear_PI_ref))
+
+linear_slopes_table <- rbind( TOD_diff_comp_minage, TOD_diff_comp_1agelwr, TOD_diff_comp_meanage, TOD_diff_comp_1ageupr, TOD_diff_comp_2ageupr,TOD_diff_PI_minage, TOD_diff_PI_1agelwr, TOD_diff_PI_meanage,  TOD_diff_PI_1ageupr, TOD_diff_PI_2ageupr)
+
+names(linear_slopes_table) <- c("GROUP", "corrected_cort_age_yrs", "Intercept", "diurnal_slope", "df", "t.value", "p.value", "upper", "lower")
+
+linear_slopes_table
+```
+
+ 
+```{r}
+cort_ave_days_slope <- cort_ave_days_m %>%
+  dplyr::select(IDENT_SUBID, GROUP, corrected_cort_age_yrs, cort_use, time_of_day, index_wave) %>%
+  spread(time_of_day, cort_use) %>%
+  mutate(diurnal_slope = Morning - Evening)
+
+cort_linear_slope_plot <- ggplot(linear_slopes_table, aes(x = corrected_cort_age_yrs, 
+                                                          y = diurnal_slope, color = GROUP)) + 
+  geom_line (size = 1) + 
+  geom_ribbon(aes(ymax = upper, ymin = lower, fill = GROUP), color = NA, alpha = 0.1) + 
+  ylab("Diurnal Cortisol Slope (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = cort_ave_days_slope,
+             aes(x= corrected_cort_age_yrs, y= diurnal_slope, 
+                                         color = GROUP), size=1, alpha = 0.1)+ 
+  geom_line(data = cort_ave_days_slope,
+            aes(x = corrected_cort_age_yrs, y = diurnal_slope, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.1) + 
+  scale_x_continuous(breaks = seq(4,19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+ scale_y_continuous(limits = c(-5, 55), expand = expand_scale(mult = c(0, .1))) + my_colors + my_colors2 +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) 
+cort_linear_slope_plot
+png("figures/diurnal_slope_linear_model_plot_overlapped.png", width = 6, height = 4)
+cort_linear_slope_plot
+dev.off()
+
+```
+
+SAVING TO POWERPT 
+```{r}
+
+ppt_test2 <- read_pptx() %>%
+  add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  ph_with_vg(code = print(cort_linear_slope_plot)) %>%
+  print(target = "../../../manuscript/figures/powerpoint_vector_figures/Feb_2020/diurnal_slope_linear_model_plot_overlapped.pptx")
+  
+```
+
+## 2 ) Quadratic
+
+### plot waking & evening separately
+```{r}
+# make specific new data for COMP age effect.
+agelist <- seq(4, 19, 0.5)
+effect_df <- data.frame(corrected_cort_age_yrs = agelist, 
+                    age_squared = agelist^2, 
+                    time_of_day = c(rep("Waking", length(agelist)), rep("Evening", length(agelist))), 
+                    GROUP = c(rep("COMP", 2*length(agelist)), rep("PI", 2*length(agelist))), 
+                    index_day = 0, batch.c = 0, 
+       sex.centered = 0, meds.c = 0, index_wave.c = 0, index_day.c = 0)
+
+
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~  GROUP*time_of_day*corrected_cort_age_yrs + 
+                          GROUP*time_of_day*age_squared + 
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c, data = effect_df) 
+
+cis <- diag(fit.mat %*% tcrossprod(vcov(lmer_quad_nested), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+# 
+effect_df$cort_Y <- predict(lmer_quad_nested, effect_df, re.form = NA)
+effect_df$cort_lwr <- effect_df$cort_Y-1.96*sqrt(cis)
+effect_df$cort_upr <- effect_df$cort_Y+1.96*sqrt(cis)
+
+effect_df <- effect_df %>%
+  mutate(# change naming from waking cort to morning 
+        time_of_day = as.factor(ifelse(time_of_day == "Waking", "Morning", "Evening")), 
+# but they are ordered alphabetaically, so need to set morningn as baseline.
+        time_of_day = relevel(time_of_day, "Morning"))
+
+```
+
+```{r}
+
+cort_quad_PI_plot <- ggplot(effect_df, aes(x = corrected_cort_age_yrs, y = cort_Y, color = GROUP)) + 
+  geom_line(size = 1) + 
+  my_colors + my_colors2 +facet_grid(~time_of_day) + 
+  ylab("Cortisol Values (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = cort_ave_days_m,
+             aes(x= corrected_cort_age_yrs, y= cort_use, 
+                                         color = GROUP), size=1, alpha = 0.15)+ 
+  geom_line(data = cort_ave_days_m,
+            aes(x = corrected_cort_age_yrs, y = cort_use, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.15) + 
+ scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+ scale_y_continuous(limits = c(-5, 55), expand = expand_scale(mult = c(0, .1)))+
+  theme_classic() + 
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) 
+cort_quad_PI_plot 
+
+pdf("figures/cort_quadratic_model_plot_overlapped.pdf", width = 6, height = 4)
+cort_quad_PI_plot
+dev.off()
+
+```
+
+
+
+
+## 3) Piecewise ORIGINAL VERSION
+
+## plot  evening / waking separately
+```{r, eval = F, include = F}
+
+### mean-center age at breakpoint
+data_use$age1 <- b1(data_use$corrected_cort_age_yrs, bp)-bp
+data_use$age2 <- b2(data_use$corrected_cort_age_yrs, bp)-bp
+
+# make a new dataframe to fit the data to for plotting.
+# specify ages that you want estimates for before and after breakpoint. 
+# note that age1 and age2 are centered at the breakpoint, so it's confusing! 
+effect_df <- data.frame(age1 = c(min(data_use$corrected_cort_age_yrs[data_use$GROUP.n == 0]) - bp,
+                             # min age 4 of comps
+                             min(data_use$age1) + 3, # age 7
+                              min(data_use$age1) + 6, # age 10
+                             -0.01, # really bp - 0.01 = 12.99, right before breakpoint.
+                             rep(0, 4)),#  make 3 sets of zero
+                    age2 = c(rep(0, 4), # make 3 sets of zero 
+                             +0.01, # age 13.1, at breakpoint
+                             max(data_use$age2) - 5, # age 15 
+                             max(data_use$age2) - 4,  # age 16 
+                             # only plot up to the max age of PIs 
+                             max(data_use$corrected_cort_age_yrs[data_use$GROUP.n == 1]) - bp),  
+                                # max age, ~ 19 
+                    time_of_day = c(rep("Waking", 8), rep("Evening", 8)), 
+                    GROUP = c(rep("COMP", 16), rep("PI", 16)), 
+                    # set all covarriates to zeor
+                    batch.c = 0, sex.centered = 0, meds.c = 0, 
+                    index_wave.c = 0, index_day.c = 0)
+
+
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~  GROUP*age1*time_of_day + GROUP*age2*time_of_day + 
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c, data = effect_df) 
+
+cis <- diag(fit.mat %*% tcrossprod(vcov(piecewise_mod_waking_ref), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+# 
+effect_df$cort_Y <- predict(piecewise_mod_waking_ref, effect_df, re.form = NA)
+effect_df$cort_lwr <- effect_df$cort_Y-1.96*sqrt(cis)
+effect_df$cort_upr <- effect_df$cort_Y+1.96*sqrt(cis)
+
+# split into 2 dataframes and then stack. 
+effect_dfage1 <- effect_df %>%
+  dplyr::select(-age2) %>%
+  filter(age1 < 0) %>%
+ rename(corrected_cort_age_yrs = age1) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs+bp,
+        # change naming from waking cort to morning 
+        time_of_day = as.factor(ifelse(time_of_day == "Waking", "Morning", "Evening")), 
+# but they are ordered alphabetaically, so need to set morningn as baseline.
+        time_of_day = relevel(time_of_day, "Morning"))
+effect_dfage2 <- effect_df %>%
+  dplyr::select(-age1) %>%
+  filter(age2 > 0) %>%
+  rename(corrected_cort_age_yrs = age2)%>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs+bp,
+        # change naming from waking cort to morning 
+        time_of_day = as.factor(ifelse(time_of_day == "Waking", "Morning", "Evening")), 
+# but they are ordered alphabetaically, so need to set morningn as baseline.
+        time_of_day = relevel(time_of_day, "Morning"))
+  
+effect_df3 <- rbind(effect_dfage1, effect_dfage2)
+```
+
+ ggplot 
+```{r, include = F, eval = F}
+
+cort_piecewise_PI_plot <- ggplot(effect_dfage1, aes(x = corrected_cort_age_yrs, y = cort_Y, color = GROUP)) + 
+  geom_line(size = 1) + geom_line(data =effect_dfage2, aes(x = corrected_cort_age_yrs, y = cort_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 +facet_grid(~time_of_day) + 
+  ylab("Cortisol Values (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = cort_ave_days_m,
+             aes(x= corrected_cort_age_yrs, y= cort_use, 
+                                         color = GROUP), size=1, alpha = 0.1)+ 
+  geom_line(data = cort_ave_days_m,
+            aes(x = corrected_cort_age_yrs, y = cort_use, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.1) + 
+  theme_classic() + 
+ scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19)) +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black"))
+
+pdf("figures/cort_piecewise_model_plot_overlapped.pdf", width = 6, height = 4)
+cort_piecewise_PI_plot
+dev.off()
+
+pdf("figures/cort_piecewise_model_plot_overlapped_CI.pdf", width = 6, height = 4)
+cort_piecewise_PI_plot +   geom_ribbon(data = effect_dfage1, aes(ymin = cort_lwr, ymax =cort_upr, fill = GROUP),  alpha = .11, color = NA)  + 
+  geom_ribbon(data = effect_dfage2, aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP), alpha = 0.11, color = NA)
+dev.off()
+```
+
+## plot diurnal slopes (waking - evening)
+get confidence intervals 
+```{r}
+data_use$time_of_day <- relevel(data_use$time_of_day, "Evening")
+
+data_use$age1 <- b1(data_use$corrected_cort_age_yrs, bp)-bp
+data_use$age2 <- b2(data_use$corrected_cort_age_yrs, bp)-bp
+
+# can get time of day differences at specific ages, with comp as reference, and then PI as reference.
+lmer_piecewise_comp_ref <- lmer(cort_use ~ 
+                           GROUP * time_of_day* age1 +
+                           GROUP*time_of_day*age2 +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c #, random = ~ 1 + time_of_day| IDENT_SUBID,
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                   data = data_use)
+group_effect_age_bp <- summary(lmer_piecewise_comp_ref)$coefficients[11,]
+
+cort_sd_age <- sd(data_use$corrected_cort_age_yrs)
+cort_mean_age <- mean(data_use$corrected_cort_age_yrs)
+cort_mean_minusbp <- cort_mean_age - bp
+cort_mean_age+ 2*cort_sd_age
+
+TOD_diff_comp_agebp <- data.frame(GROUP = "COMP", age = bp, condslope.lmer.pointestimates("time_of_dayWaking", "age1", 0, lmer_piecewise_comp_ref))
+
+TOD_diff_comp_meanage <- data.frame(GROUP = "COMP", age = cort_mean_age, condslope.lmer.pointestimates("time_of_dayWaking", "age1", cort_mean_minusbp, lmer_piecewise_comp_ref))
+
+TOD_diff_comp_minage <- data.frame(GROUP = "COMP", age = 4, condslope.lmer.pointestimates("time_of_dayWaking", "age1", -9, lmer_piecewise_comp_ref))
+
+TOD_diff_comp_1agelwr <- data.frame(GROUP = "COMP", age = cort_mean_age - 1*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "age1", cort_mean_minusbp - 1*cort_sd_age, lmer_piecewise_comp_ref))
+
+TOD_diff_comp_1ageupr <- data.frame(GROUP = "COMP", age = cort_mean_age + 1*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "age2", cort_mean_minusbp + 1*cort_sd_age, lmer_piecewise_comp_ref))
+
+TOD_diff_comp_2ageupr <- data.frame(GROUP = "COMP", age = cort_mean_age + 2*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "age2", cort_mean_minusbp + 2*cort_sd_age, lmer_piecewise_comp_ref))
+
+### PI 
+data_use$GROUP_PI <- ifelse(data_use$GROUP == "COMP", 1, 0)
+lmer_piecewise_PI_ref <- lmer(cort_use ~ 
+                           GROUP_PI * time_of_day* age1 +
+                           GROUP_PI*time_of_day*age2 +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c #, random = ~ 1 + time_of_day| IDENT_SUBID,
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                   data = data_use)
+
+TOD_diff_PI_agebp <- data.frame(GROUP = "PI", age = bp, condslope.lmer.pointestimates("time_of_dayWaking", "age1", 0, lmer_piecewise_PI_ref))
+
+TOD_diff_PI_meanage <- data.frame(GROUP = "PI", age = cort_mean_age, condslope.lmer.pointestimates("time_of_dayWaking", "age1", cort_mean_minusbp, lmer_piecewise_PI_ref))
+
+TOD_diff_PI_minage <- data.frame(GROUP = "PI", age = 4, condslope.lmer.pointestimates("time_of_dayWaking", "age1", -9, lmer_piecewise_PI_ref))
+
+TOD_diff_PI_1agelwr <- data.frame(GROUP = "PI", age = cort_mean_age - 1*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "age1", cort_mean_minusbp - 1*cort_sd_age, lmer_piecewise_PI_ref))
+
+TOD_diff_PI_1ageupr <- data.frame(GROUP = "PI", age = cort_mean_age + 1*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "age2", cort_mean_minusbp + 1*cort_sd_age, lmer_piecewise_PI_ref))
+
+TOD_diff_PI_2ageupr <- data.frame(GROUP = "PI", age = cort_mean_age + 2*cort_sd_age, condslope.lmer.pointestimates("time_of_dayWaking", "age2", cort_mean_minusbp + 2*cort_sd_age, lmer_piecewise_PI_ref))
+
+piecewise_diurnal_slopes_table <- rbind( TOD_diff_comp_minage, TOD_diff_comp_1agelwr, TOD_diff_comp_meanage, TOD_diff_comp_agebp, TOD_diff_comp_1ageupr, TOD_diff_comp_2ageupr,TOD_diff_PI_minage, TOD_diff_PI_1agelwr, TOD_diff_PI_meanage, TOD_diff_PI_agebp, TOD_diff_PI_1ageupr, TOD_diff_PI_2ageupr)
+
+names(piecewise_diurnal_slopes_table ) <- c("GROUP", "corrected_cort_age_yrs", "Intercept", "diurnal_slope", "df", "t.value", "p.value", "upper", "lower")
+ 
+```
+
+
+
+```{r}
+cort_piecewise_slope_plot <- ggplot(
+piecewise_diurnal_slopes_table , aes(x = corrected_cort_age_yrs,
+                                                           y = diurnal_slope, color = GROUP)) + 
+  geom_line (size = 1) + geom_ribbon(aes(ymin = lower, ymax = upper, fill = GROUP), color = NA, alpha =.1) + 
+  ylab("Diurnal Cortisol (Waking - Evening)") + xlab("Age (years)") + 
+  geom_point(data = cort_ave_days_slope,
+             aes(x= corrected_cort_age_yrs, y= diurnal_slope, 
+                                         color = GROUP), size=1, alpha = 0.1) + 
+  geom_line(data = cort_ave_days_slope,
+            aes(x = corrected_cort_age_yrs, y = diurnal_slope, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.1) + 
+  scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+ scale_y_continuous(limits = c(-5, 55), expand = expand_scale(mult = c(0, .1))) + my_colors + my_colors2 +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) 
+
+pdf("figures/diurnal_slope_piecewise_model_plot_overlapped.pdf", width = 6, height = 4)
+cort_piecewise_slope_plot
+dev.off()
+```
+
+
+## plot slopes in different forms
+slopes for all ages in panel form
+```{r, include = F, eval = F}
+
+# clean up effect table so that you can plot faceting by age
+effect_df4 <- effect_df3 %>% 
+  mutate(time_of_day= relevel(time_of_day, "Morning"), 
+         age_split =  as.factor(ifelse(corrected_cort_age_yrs < 13, "Child", "Adolescent")), 
+         corrected_cort_age_yrs = round(corrected_cort_age_yrs), 
+         Age = as.factor(corrected_cort_age_yrs) ) %>%
+  # omit extra age split that we don't need, right before breakpoint.
+  filter(! (corrected_cort_age_yrs == 13 & age_split == "Child" ), 
+         # exclude age 15, too many bins 
+         !(Age == 15))
+  
+
+cort_slope_plot <- ggplot(effect_df4, aes(x = time_of_day, y = cort_Y,
+                  color = corrected_cort_age_yrs)) + 
+  geom_line(aes(x = time_of_day, y = cort_Y, group = corrected_cort_age_yrs)) + 
+  facet_grid(~GROUP) + xlab (" Time of day") + 
+  theme_classic() + #my_colors + my_colors2 + 
+  ylab("Cortisol Values (nmol/L)")  
+cort_slope_plot
+
+ggsave(cort_slope_plot, file = "figures/waking_to_evening_age_continuous.pdf", height = 4, width = 8)
+```
+
+
+```{r, include = F, eval = F}
+adol_only <- effect_df4 %>%
+  filter(age_split == "Adolescent")
+
+child_only <- effect_df4 %>%
+  filter(age_split == "Child")
+
+adol_slope_plot <- ggplot(adol_only, aes(x = time_of_day, y = cort_Y,
+                  color = GROUP)) + 
+  geom_line(aes(x = time_of_day, y = cort_Y, group = GROUP)) + 
+   # geom_ribbon(aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP)) + 
+  facet_grid(~Age) + #theme_classic() + 
+  my_colors + my_colors2 + 
+  ylab("Cortisol Values (nmol/L)")  + xlab("Time of day")
+
+child_slope_plot <- ggplot(child_only, aes(x = time_of_day, y = cort_Y,
+                  color = GROUP)) + 
+  geom_line(aes(x = time_of_day, y = cort_Y, group = GROUP)) + 
+   # geom_ribbon(aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP)) + 
+  facet_grid(~Age) + #theme_classic() + 
+  my_colors + my_colors2 + 
+  ylab("Cortisol Values (nmol/L)")  + xlab("Time of day")
+
+
+grid.arrange(child_slope_plot, adol_slope_plot)
+
+pdf("figures/cort_piecewise_diurnal_slopes_by_age_facet.pdf", width = 3, height = 12)
+cort_slope_plot
+dev.off()
+```
+
+```{r}
+
+# get plot for youngest age -- differences 
+another_plot <- effect_df4 %>%
+  filter(Age == 10) %>%
+ggplot(aes(x = time_of_day, y = cort_Y,
+                  color = GROUP)) + 
+  geom_line(aes(x = time_of_day, y = cort_Y, group = GROUP)) + 
+   geom_ribbon(aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP)) + 
+   theme_classic() + theme(legend.position = "none") +
+  my_colors + my_colors2 + ylim(0, 40) + 
+  ylab("Cortisol Values (nmol/L)")  + xlab("Time of day")
+
+another_plot
+ggsave(another_plot, file = "figures/age10_cort_slopes.pdf", width = 3, height = 4)
+
+## get plot for oldest age - differences
+another_plot <- effect_df4 %>%
+  filter(Age == 19) %>%
+ggplot(aes(x = time_of_day, y = cort_Y,
+                  color = GROUP)) + 
+  geom_line(aes(x = time_of_day, y = cort_Y, group = GROUP)) + 
+   geom_ribbon(aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP)) + 
+   theme_classic() + ylim(0, 40) +
+  my_colors + my_colors2 + theme(legend.position = "none") +
+  ylab("Cortisol Values (nmol/L)")  + xlab("Time of day")
+
+another_plot
+
+ggsave(another_plot, file = "figures/age19_cort_slopes.pdf", width = 3, height = 4)
+
+
+```
+
+## post-hoc for diurnal cort - differences in slope (waking - evening differences)
+```{r}
+# check which time of day is reference 
+summary(data_use$time_of_day)
+data_use$age1 <- b1(data_use$corrected_cort_age_yrs, bp)-bp
+data_use$age2 <- b2(data_use$corrected_cort_age_yrs, bp)-bp
+
+# set reference to evening
+lmer_piecewise_uncentered <- lmer(cort_use ~ 
+                           GROUP* time_of_day* age1 +
+                           GROUP*time_of_day*age2 +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c #, random = ~ 1 + time_of_day| IDENT_SUBID,
+                     + (1 + index_wave.c | IDENT_SUBID), 
+                   data = data_use)
+# -9 reprseents min age (age 4) when age is centered at breakpoint of 13 years
+cort_meanage_minusbp <- cort_mean_age - bp
+group_slope_diff_min_age <- data.frame(age = bp-9, condslope.lmer.pointestimates("GROUPPI:time_of_dayWaking", "age1", -9, lmer_piecewise_uncentered))
+
+group_slope_diff_1sdlower <- data.frame(age = cort_mean_age - 1*cort_sd_age, condslope.lmer.pointestimates("GROUPPI:time_of_dayWaking", "age1", cort_meanage_minusbp -1*cort_sd_age, lmer_piecewise_uncentered))
+
+group_slope_diff_meanage <- data.frame(age = cort_mean_age, condslope.lmer.pointestimates("GROUPPI:time_of_dayWaking", "age1", cort_meanage_minusbp, lmer_piecewise_uncentered))
+
+group_slope_diff_bpage <- data.frame(age = bp, condslope.lmer.pointestimates("GROUPPI:time_of_dayWaking", "age1", 0, lmer_piecewise_uncentered))
+
+group_slope_diff_1sdupper <- data.frame(age = cort_mean_age + 1*cort_sd_age, condslope.lmer.pointestimates("GROUPPI:time_of_dayWaking", "age2", cort_meanage_minusbp + 1*cort_sd_age, lmer_piecewise_uncentered))
+
+group_slope_diff_2sdupper <- data.frame(age = cort_mean_age + 2*cort_sd_age, condslope.lmer.pointestimates("GROUPPI:time_of_dayWaking", "age2", cort_meanage_minusbp + 2*cort_sd_age, lmer_piecewise_uncentered))
+
+posthoc_piecewise_diurnal_slope_table <- rbind(group_slope_diff_min_age, group_slope_diff_1sdlower, group_slope_diff_meanage, group_slope_diff_bpage, group_slope_diff_1sdupper, group_slope_diff_2sdupper) %>%
+  dplyr::select(-w0.intercept)
+names(posthoc_piecewise_diurnal_slope_table) <- c("Age", "Estimate", "df", "t.val", "p.val", "95% upper CI", "95% lower CI")
+save(posthoc_piecewise_diurnal_slope_table, file = "model_output/full_cort_piecewise_diurnal_slope_posthoc_group_diff.Rdata")
+
+posthoc_piecewise_diurnal_slope_table 
+```
+
+
+## post-hoc for diurnal cort - differences in evening 
+```{r}
+
+# since evening = reference, pulling group coefficients will ggive us evening coefficients.
+cort_meanage_minusbp <- cort_mean_age - bp
+group_evening_diff_min_age <- data.frame(age = bp-9, condslope.lmer.pointestimates("GROUPPI", "age1", -9, lmer_piecewise_uncentered))
+
+group_evening_diff_1sdlower <- data.frame(age = cort_mean_age - 1*cort_sd_age, condslope.lmer.pointestimates("GROUPPI", "age1", cort_meanage_minusbp -1*cort_sd_age, lmer_piecewise_uncentered))
+
+group_evening_diff_meanage <- data.frame(age = cort_mean_age, condslope.lmer.pointestimates("GROUPPI", "age1", cort_meanage_minusbp, lmer_piecewise_uncentered))
+
+group_evening_diff_bpage <- data.frame(age = bp, condslope.lmer.pointestimates("GROUPPI", "age1", 0, lmer_piecewise_uncentered))
+
+group_evening_diff_1sdupper <- data.frame(age = cort_mean_age + 1*cort_sd_age, condslope.lmer.pointestimates("GROUPPI", "age2", cort_meanage_minusbp + 1*cort_sd_age, lmer_piecewise_uncentered))
+
+group_evening_diff_2sdupper <- data.frame(age = cort_mean_age + 2*cort_sd_age, condslope.lmer.pointestimates("GROUPPI", "age2", cort_meanage_minusbp + 2*cort_sd_age, lmer_piecewise_uncentered))
+
+posthoc_piecewise_evening_table <- rbind(group_evening_diff_min_age, group_evening_diff_1sdlower, group_evening_diff_meanage, group_evening_diff_bpage, group_evening_diff_1sdupper, group_evening_diff_2sdupper) %>%
+  dplyr::select(-w0.intercept)
+names(posthoc_piecewise_evening_table) <- c("Age", "Estimate", "df", "t.val", "p.val", "95% upper CI", "95% lower CI")
+save(posthoc_piecewise_evening_table, file = "model_output/full_cort_piecewise_evening_posthoc_group_diff.Rdata")
+
+posthoc_piecewise_evening_table 
+```
+
+## post-hoc for diurnal cort - differences in morning 
+```{r}
+# use piecewise_mod_waking_ref model version
+# since morning = reference, pulling group coefficients will ggive us morning coefficients.
+cort_meanage_minusbp <- cort_mean_age - bp
+group_morning_diff_min_age <- data.frame(age = bp-9, condslope.lmer.pointestimates("GROUPPI", "age1", -9, piecewise_mod_waking_ref))
+
+group_morning_diff_1sdlower <- data.frame(age = cort_mean_age - 1*cort_sd_age, condslope.lmer.pointestimates("GROUPPI", "age1", cort_meanage_minusbp -1*cort_sd_age, piecewise_mod_waking_ref))
+
+group_morning_diff_meanage <- data.frame(age = cort_mean_age, condslope.lmer.pointestimates("GROUPPI", "age1", cort_meanage_minusbp, piecewise_mod_waking_ref))
+
+group_morning_diff_bpage <- data.frame(age = bp, condslope.lmer.pointestimates("GROUPPI", "age1", 0, piecewise_mod_waking_ref))
+
+group_morning_diff_1sdupper <- data.frame(age = cort_mean_age + 1*cort_sd_age, condslope.lmer.pointestimates("GROUPPI", "age2", cort_meanage_minusbp + 1*cort_sd_age, piecewise_mod_waking_ref))
+
+group_morning_diff_2sdupper <- data.frame(age = cort_mean_age + 2*cort_sd_age, condslope.lmer.pointestimates("GROUPPI", "age2", cort_meanage_minusbp + 2*cort_sd_age, piecewise_mod_waking_ref))
+
+posthoc_piecewise_morning_table <- rbind(group_morning_diff_min_age, group_morning_diff_1sdlower, group_morning_diff_meanage, group_morning_diff_bpage, group_morning_diff_1sdupper, group_morning_diff_2sdupper) %>%
+  dplyr::select(-w0.intercept)
+names(posthoc_piecewise_morning_table) <- c("Age", "Estimate", "df", "t.val", "p.val", "95% upper CI", "95% lower CI")
+save(posthoc_piecewise_morning_table, file = "model_output/full_cort_piecewise_morning_posthoc_group_diff.Rdata")
+
+posthoc_piecewise_morning_table 
+```
+
+
+
+# WAKING ONLY 
+```{r}
+waking_cort_df <- subset(data_use, time_of_day == "Waking")
+
+```
+
+
+
+### Katherine's method for plotting effects
+
+```{r}
+# make specific new data for COMP age effect.
+effect_df <- data.frame(age1 = c(-9, -8, -7, -6.44, -5, -4, -3, -2, -1, -0.0001, rep(0,6)),
+                    age2 = c(rep(0, 10), .0001, 2, 3, 4, 5, 5.9), 
+                    GROUP = c(rep("COMP", 16), rep("PI",16)), batch.c = 0, 
+       sex.centered = 0, meds.c = 0, index_wave.c = 0, index_day.c = 0)
+nrow(effect_df)
+
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~  GROUP + age1 + age2 +
+                          GROUP:age1 + GROUP:age2 + batch.c +
+                          index_wave.c + index_day.c + 
+                    sex.centered + meds.c, 
+                    data = effect_df) 
+#head(fit.mat)
+cis <- diag(fit.mat %*% tcrossprod(vcov(lmer_piecewise_waking), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+# 
+effect_df$cort_Y <- predict(lmer_piecewise_waking, effect_df, re.form = NA)
+effect_df$cort_lwr <- effect_df$cort_Y-1.96*sqrt(cis)
+effect_df$cort_upr <- effect_df$cort_Y+1.96*sqrt(cis)
+
+# split into 2 dataframes and then stack. 
+effect_dfage1 <- effect_df %>%
+  dplyr::select(-age2) %>%
+  filter(age1 < 0) %>%
+ rename(corrected_cort_age_yrs = age1) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs + waking_bp)
+effect_dfage2 <- effect_df %>%
+  dplyr::select(-age1) %>%
+  filter(age2 > 0) %>%
+  rename(corrected_cort_age_yrs = age2) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs + waking_bp)
+
+```
+
+
+## for talk: build comp results alone, then add PIs 
+```{r}
+waking_piecewise_COMP_plot <- ggplot(data = filter(effect_dfage1, GROUP == "COMP"), 
+        aes(x = corrected_cort_age_yrs, y = cort_Y, color = GROUP)) + 
+  geom_line(size = 1) + 
+  geom_line(data = filter(effect_dfage2, GROUP == "COMP"), 
+            aes(x = corrected_cort_age_yrs, y = cort_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 +
+  ylab("Morning Cortisol (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = filter(cort_ave_days_m, time_of_day == "Morning" & GROUP == "COMP"),
+             aes(x= corrected_cort_age_yrs, y= cort_use, 
+                                         color = GROUP), size=1, alpha = 0.2)+ 
+  geom_line(data = filter(cort_ave_days_m, time_of_day == "Morning" & GROUP == "COMP"),
+            aes(x = corrected_cort_age_yrs, y = cort_use, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.2) + 
+ scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+# scale_y_continuous(expand = expand_scale(mult = c(0, .1))) +
+  ylim(0, 60) +
+   theme(legend.position = "none") + 
+  geom_ribbon(data = filter(effect_dfage1,GROUP == "COMP"),
+                            aes(ymin = cort_lwr, ymax =cort_upr, fill = GROUP),  alpha = .1, color = NA)  + 
+  geom_ribbon(data = filter(effect_dfage2, GROUP == "COMP"),
+              aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP), alpha = 0.1, color = NA)
+
+pdf("figures/waking_piecewise_model_plot_COMP_ONLY.pdf", width = 9, height = 6)
+waking_piecewise_COMP_plot
+dev.off()
+
+```
+
+## identical plot with both groups 
+```{r}
+waking_piecewise_BOTH_plot <- ggplot(data = effect_dfage1, 
+        aes(x = corrected_cort_age_yrs, y = cort_Y, color = GROUP)) + 
+  geom_line(size = 1) + 
+  geom_line(data = effect_dfage2, 
+            aes(x = corrected_cort_age_yrs, y = cort_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 +
+  ylab("Morning Cortisol (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = filter(cort_ave_days_m, time_of_day == "Morning"),
+             aes(x= corrected_cort_age_yrs, y= cort_use, 
+                                         color = GROUP), size=1, alpha = 0.2) + 
+  geom_line(data = filter(cort_ave_days_m, time_of_day == "Morning"),
+            aes(x = corrected_cort_age_yrs, y = cort_use, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.2) + 
+ scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+  ylim(0, 60) +
+ #scale_y_continuous(expand = expand_scale(mult = c(0, .1))) +
+   theme(legend.position = "none") + 
+  geom_ribbon(data = effect_dfage1,
+                            aes(ymin = cort_lwr, ymax =cort_upr, fill = GROUP),  alpha = .1, color = NA)  + 
+  geom_ribbon(data = effect_dfage2,
+              aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP), alpha = 0.1, color = NA)
+
+pdf("figures/waking_piecewise_model_plot_BOTH.pdf", width = 9, height = 6)
+waking_piecewise_BOTH_plot
+dev.off()
+```
+# testing batch effects of cort
+```{r}
+summary(as.factor(waking_cort_df$batch))
+
+batch_by_wave <- waking_cort_df %>%
+  group_by(IDENT_SUBID, index_wave, batch) %>%
+  summarize(n_subjects = n()) %>%
+  group_by(index_wave, batch) %>%
+  summarize(n = n())
+  
+batch_by_wave
+```
+
+## age differences by batch?
+```{r}
+data_use$batch <- as.factor(data_use$batch)
+effect_df <- lmer(corrected_cort_age_yrs ~ batch + 
+                (1 | IDENT_SUBID), data = data_use)
+summary(effect_df)
+```
+
+## plot batch by age
+```{r}
+
+batch_Effects <- ggplot(data = waking_cort_df, aes(x = corrected_cort_age_yrs, y = cort_use, color = GROUP)) + 
+  geom_point(aes(fill = GROUP), alpha= 0.2) + my_colors + my_colors2 + 
+  #geom_line(aes(color = GROUP, group = IDENT_SUBID), alpha = 0.2) +
+  facet_grid (~batch) + geom_smooth(method = "lm") +
+  ylab ("Waking cortisol") + xlab ("Age (years)")
+
+pdf("figures/batch_effects_on_waking_cort.pdf", width = 10, height = 4)
+batch_Effects
+dev.off()
+```
+
+## wave effects by age
+```{r}
+
+wave_Effects <- ggplot(data = waking_cort_df, 
+                       aes(x = corrected_cort_age_yrs, y = cort_use, color = GROUP)) + 
+  geom_point(aes(fill = GROUP), alpha= 0.2) + my_colors + my_colors2 + 
+  #geom_line(aes(color = GROUP, group = IDENT_SUBID), alpha = 0.2) +
+  facet_grid (~index_wave) + geom_smooth(method = "lm") +
+  ylab ("Waking cortisol") + xlab ("Age (years)")
+
+pdf("figures/wave_effects_on_waking_cort.pdf", width = 10, height = 4)
+wave_Effects
+dev.off()
+```
+
+
+## wave x batch effects by age
+```{r}
+
+wave_Effects <- ggplot(data = waking_cort_df, 
+                       aes(x = corrected_cort_age_yrs, y = cort_use, color = GROUP)) + 
+  geom_point(aes(fill = GROUP), alpha= 0.2, size = 0.5) + my_colors + my_colors2 + 
+  #geom_line(aes(color = GROUP, group = IDENT_SUBID), alpha = 0.2) +
+  facet_grid (index_wave ~ batch) + geom_smooth(method = "lm") +
+  ylab ("Waking cortisol") + xlab ("Age (years)")
+
+pdf("figures/batch_x_wave_effects_on_waking_cort.pdf", width = 10, height = 4)
+wave_Effects
+dev.off()
+```
+
+## model with batch 1 
+```{r}
+
+lmer_piecewise_waking_batch1 <- lmer(cort_use ~ 
+                                GROUP + age1 + age2 + 
+                          GROUP:age1 + GROUP:age2 +
+                            index_day.c + 
+                 sex.centered + meds.c +
+                     + (1 | IDENT_SUBID), 
+                   data = subset(waking_cort_df, batch == 1))
+summary(lmer_piecewise_waking_batch1)
+
+```
+
+
+### Katherine's method for plotting effects
+
+```{r}
+# make specific new data for COMP age effect.
+effect_df <- data.frame(age1 = c(-9, -8, -7, -6.44, -5, -4, -3, -2, -1, -0.0001, rep(0,6)),
+                    age2 = c(rep(0, 10), .0001, 2, 3, 4, 5, 5.9), 
+                    GROUP = c(rep("COMP", 16), rep("PI",16)), 
+       sex.centered = 0, meds.c = 0,  index_day.c = 0)
+nrow(effect_df)
+
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~    GROUP + age1 + age2 + 
+                          GROUP:age1 + GROUP:age2 +
+                            index_day.c + 
+                 sex.centered + meds.c,
+                    data = effect_df) 
+#head(fit.mat)
+cis <- diag(fit.mat %*% tcrossprod(vcov(lmer_piecewise_waking_batch1), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+# 
+effect_df$cort_Y <- predict(lmer_piecewise_waking_batch1, effect_df, re.form = NA)
+effect_df$cort_lwr <- effect_df$cort_Y-1.96*sqrt(cis)
+effect_df$cort_upr <- effect_df$cort_Y+1.96*sqrt(cis)
+
+# split into 2 dataframes and then stack. 
+effect_dfage1 <- effect_df %>%
+  dplyr::select(-age2) %>%
+  filter(age1 < 0) %>%
+ rename(corrected_cort_age_yrs = age1) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs + waking_bp)
+effect_dfage2 <- effect_df %>%
+  dplyr::select(-age1) %>%
+  filter(age2 > 0) %>%
+  rename(corrected_cort_age_yrs = age2) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs + waking_bp)
+
+```
+
+```{r}
+
+waking_piecewise_PI_plot <- ggplot(effect_dfage1, aes(x = corrected_cort_age_yrs, 
+                                                  y = cort_Y, color = GROUP)) + 
+  geom_line(size = 1) + geom_line(data =effect_dfage2, aes(x = corrected_cort_age_yrs, 
+                                                       y = cort_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 +
+  ylab("Waking Cortisol (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = subset(cort_ave_days_m, time_of_day == "Waking"& batch.c < -2),
+             aes(x= corrected_cort_age_yrs, y= cort_use, 
+                                         color = GROUP), size=1, alpha = 0.11)+ 
+  scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+ scale_y_continuous(expand = expand_scale(mult = c(0, .1))) +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) + 
+  geom_ribbon(data = effect_dfage1, aes(ymin = cort_lwr, ymax =cort_upr, fill = GROUP),  alpha = .1, color = NA)  + 
+  geom_ribbon(data = effect_dfage2, aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP), alpha = 0.1, color = NA)
+
+pdf("figures/batch1_waking_piecewise_plot.pdf", width = 6, height = 4)
+waking_piecewise_PI_plot
+dev.off()
+
+summary(as.factor(cort_ave_days_m$batch.c))
+```
+
+## model with wave1 (jessica's data)
+```{r}
+lmer_piecewise_waking_wave1 <- lmer(cort_use ~ 
+                                GROUP + age1 + age2 + 
+                          GROUP:age1 + GROUP:age2 + batch.c + 
+                            index_day.c + 
+                 sex.centered + meds.c +
+                     + (1 | IDENT_SUBID), 
+                   data = subset(waking_cort_df, index_wave == 1))
+summary(lmer_piecewise_waking_wave1)
+
+```
+
+
+### Katherine's method for plotting effects
+
+```{r}
+# make specific new data for COMP age effect.
+effect_df <- data.frame(age1 = c(-9, -8, -7, -6.44, -5, -4, -3, -2, -1, -0.0001, rep(0,6)),
+                    age2 = c(rep(0, 10), .0001, 2, 3, 4, 5, 5.9), 
+                    GROUP = c(rep("COMP", 16), rep("PI",16)), batch.c = 0, 
+       sex.centered = 0, meds.c = 0,  index_day.c = 0)
+nrow(effect_df)
+
+# specify design matrix with fixed effects and new df
+fit.mat <- model.matrix(~    GROUP + age1 + age2 + 
+                          GROUP:age1 + GROUP:age2 + batch.c + 
+                            index_day.c + 
+                 sex.centered + meds.c,
+                    data = effect_df) 
+#head(fit.mat)
+cis <- diag(fit.mat %*% tcrossprod(vcov(lmer_piecewise_waking_wave1), fit.mat))
+
+# predict y values and lwr/upr bounds using model object and new data
+# 
+effect_df$cort_Y <- predict(lmer_piecewise_waking_wave1, effect_df, re.form = NA)
+effect_df$cort_lwr <- effect_df$cort_Y-1.96*sqrt(cis)
+effect_df$cort_upr <- effect_df$cort_Y+1.96*sqrt(cis)
+
+# split into 2 dataframes and then stack. 
+effect_dfage1 <- effect_df %>%
+  dplyr::select(-age2) %>%
+  filter(age1 < 0) %>%
+ rename(corrected_cort_age_yrs = age1) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs + waking_bp)
+effect_dfage2 <- effect_df %>%
+  dplyr::select(-age1) %>%
+  filter(age2 > 0) %>%
+  rename(corrected_cort_age_yrs = age2) %>%
+  mutate(corrected_cort_age_yrs = corrected_cort_age_yrs + waking_bp)
+
+```
+
+```{r}
+
+waking_piecewise_PI_plot <- ggplot(effect_dfage1, aes(x = corrected_cort_age_yrs, 
+                                                  y = cort_Y, color = GROUP)) + 
+  geom_line(size = 1) + geom_line(data =effect_dfage2, aes(x = corrected_cort_age_yrs, 
+                                                       y = cort_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 +
+  ylab("Waking Cortisol (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = subset(cort_ave_days_m, time_of_day == "Waking"),
+             aes(x= corrected_cort_age_yrs, y= cort_use, 
+                                         color = GROUP), size=1, alpha = 0.11)+ 
+  geom_line(data = subset(cort_ave_days_m, time_of_day == "Waking"),
+            aes(x = corrected_cort_age_yrs, y = cort_use, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.11) + 
+ scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+ scale_y_continuous(expand = expand_scale(mult = c(0, .1))) +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) + 
+  geom_ribbon(data = effect_dfage1, aes(ymin = cort_lwr, ymax =cort_upr, fill = GROUP),  alpha = .1, color = NA)  + 
+  geom_ribbon(data = effect_dfage2, aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP), alpha = 0.1, color = NA)
+
+waking_piecewise_PI_plot
+```
+
+
+#### repeating same plot, but with residualized cort (removing batch effects)
+```{r}
+# get residuals from batch and all other covariates! 
+batch_mod <- lmer(cort_use ~ batch.c + (1 | IDENT_SUBID), data = waking_cort_df)
+# adding mean here, because residuals are centered around 0.
+waking_cort_df$cort_residuals_batch <- residuals(batch_mod) + mean(waking_cort_df$cort_use)
+
+#this is so that we can plot the raw data, but plot means across both days instead of plotting 2 days per subj (per time of day, per wave...)
+
+cort_ave_days_m_waking <- waking_cort_df %>%
+  group_by(IDENT_SUBID, index_wave, time_of_day) %>%
+  # this will provide average cort by each wave, and time of day...
+  #aka average across 2 days if that subject has 2 days of data!
+  dplyr::summarize(n_cort_samples = n(), 
+            cort_use = mean(cort_use, na.rm = T),
+            cort_residuals_batch = mean(cort_residuals_batch, na.rm = T),
+            PDS_mean = mean(PDS_mean),
+            corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
+            GROUP.n = mean(GROUP.n), 
+            sex.centered = mean(sex.centered), 
+            meds.c = mean(meds.c),
+            batch.c = mean(batch.c), 
+            index_wave.c = mean(index_wave.c))
+
+cort_ave_days_m_waking$GROUP <- as.factor(ifelse(cort_ave_days_m_waking$GROUP.n == 0, "COMP", "PI"))
+
+# now plot 
+waking_piecewise_PI_plot_residuals <- ggplot(effect_dfage1, aes(x = corrected_cort_age_yrs, 
+                                                  y = cort_Y, color = GROUP)) + 
+  geom_line(size = 1) + geom_line(data =effect_dfage2, aes(x = corrected_cort_age_yrs, 
+                                                       y = cort_Y, color = GROUP), size = 1) + 
+  my_colors + my_colors2 +
+  ylab("Waking Cortisol (nmol/L)") + xlab("Age (years)") + 
+  geom_point(data = cort_ave_days_m_waking,
+             aes(x= corrected_cort_age_yrs, y= cort_residuals_batch, 
+                                         color = GROUP), size=1, alpha = 0.11)+ 
+  geom_line(data = cort_ave_days_m_waking,
+            aes(x = corrected_cort_age_yrs, y = cort_residuals_batch, 
+                color = GROUP, group = IDENT_SUBID), alpha = 0.11) + 
+ scale_x_continuous(breaks = seq(4, 19, by = 2), limits=c(4.0, 19), expand = c(.02,0)) +
+ scale_y_continuous(expand = expand_scale(mult = c(0, .1))) +
+   theme(legend.position= c(0.10, 0.90),  legend.key.height = unit(0.05, "cm"),
+         legend.key.width = unit(0.05, "cm"), legend.background = element_rect(color = "black")) + 
+  geom_ribbon(data = effect_dfage1, aes(ymin = cort_lwr, ymax =cort_upr, fill = GROUP),  alpha = .1, color = NA)  + 
+  geom_ribbon(data = effect_dfage2, aes(ymin = cort_lwr, ymax = cort_upr, fill = GROUP), alpha = 0.1, color = NA)
+
+waking_piecewise_PI_plot_residuals
+
+pdf("figures/waking_piecewise_model_plot_overlapped_CI_with_batch_residuals.pdf", width = 6, height = 4)
+waking_piecewise_PI_plot_residuals
+dev.off()
+```

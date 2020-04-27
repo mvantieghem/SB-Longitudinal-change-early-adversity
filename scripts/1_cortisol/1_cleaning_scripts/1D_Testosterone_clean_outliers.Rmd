@@ -13,20 +13,15 @@ output:
     toc: yes
 ---
 
-# clean and organize data for for longitudinal TESTOSTERONE
-- based on sex - within sex normed percentages? 
-- significant effects of time of day (waking > evening)
-- a lot of evening testos data missing from wave 1 
-- so we will use only waking testos values! 
+# NOTES
+- clean and organize data for for longitudinal TESTOSTERONE \
+- based on sex - within sex normed percentages \
+- significant effects of time of day (waking > evening) \
+- a lot of evening testos data missing from wave 1  \
+- so we will use only waking testos values!  \
 
-```{r, include = F}
-library(ggplot2)
-library(dplyr)
-library(tidyverse)
-library(lme4)
-library(lmerTest)
-main_dir <- "/Users/michellevantieghem2/Documents/Columbia/LabDATA/Projects/git_repo_backups/structural_analysis_2018/"
-
+```{r, warnings = F, include = F, message = F}
+source("../../0_R_analysis_setup_file.R")
 ```
 
 # load data that has cort + testosterone, 

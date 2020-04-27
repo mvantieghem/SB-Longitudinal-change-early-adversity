@@ -13,9 +13,9 @@ output:
     toc: yes
 ---
 
-# updated june 2018:
-make sure you're using corrected_cort_age_yrs and cort_values_fixed 
-
+# NOTES
+- calculating age intervals between waves, setting up factors
+- updated june 2018, make sure you're using corrected_cort_age_yrs and cort_values_fixed 
 
 
 ```{r, warnings = F, include = F, message = F}
@@ -31,7 +31,7 @@ nrow(cort_cleaned.no.outliers)
 names(cort_cleaned.no.outliers)
 ```
 
-# set up all of these variables o be in the right format! 
+# set up all of these variables to be in the right format! 
 ```{r}
 cort_cleaned.no.outliers$GROUP <- as.factor(cort_cleaned.no.outliers$GROUP.x)
 cort_cleaned.no.outliers$index_wave <- as.factor(cort_cleaned.no.outliers$index_wave)

@@ -13,8 +13,7 @@ output:
     toc: yes
 ---
 # Notes
-feb 18 - updating to include comps > 19 since there are only 3 subjects over that age limit. 
-
+Data cleaning and demographics per wave 
 
 ```{r, warnings = F, include = F, message = F}
 source("../../0_R_analysis_setup_file.R")
@@ -42,25 +41,11 @@ cort_merge8 %>%
 
 ```
 
+
+# remove extreme value and subject with no batch for cort. 
 ```{r}
-nrow(cort_merge8)
-# not excluding for now.
-sum(is.na(cort_merge8$person.centered.time))
-### REMOVE HIGH CORT COMP 
-cort_merge8 <- subset(cort_merge8, cort_values_fixed_no_outliers < 75)
-```
-
-*TEST AGE SUBSET ERROR*
-```{r}
-#cort_merge8 <- cort_merge8 %>%
-  # these rows were accidentally excluded before
-  #mutate(exclude = ifelse(GROUP == "COMP" & is.na(cort_age_wave1), 1, 0))
-
-#cort_merge8 <- cort_merge8 %>%
- # filter(exclude == 0)
-# check groups 
-
-#nrow(cort_merge8)
+cort_merge8 <- cort_merge8 %>%
+  filter(cort_values_fixed_no_outliers < 75 & !is.na(batch))
 ```
 
 ## fixing variables 
@@ -136,8 +121,6 @@ dev.off()
 
 
 
-
-
 ## create a separate raw df for plotting that averages across DAYS.
 ```{r}
 summary(cort_merge8$GROUP)
@@ -153,28 +136,160 @@ cort_ave_days_m <- cort_merge8 %>%
             corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
             GROUP.n = mean(GROUP.n), 
             sex = mean(sex))
-nrow(cort_ave_days_m)
+#nrow(cort_ave_days_m)
 cort_ave_days_m$GROUP <- as.factor(ifelse(cort_ave_days_m$GROUP.n == 0, "COMP", "PI"))
 summary(cort_ave_days_m$GROUP)
+
 ```
 
-## how many subjects are missing time points of data?
+# Quality Control info 
+
+## missing samples or time-stamps across the day 
+
 ```{r}
-cort_count_m<- cort_merge8 %>%
+# calculate number of cort samples per day, per wave, per subject. 
+cort_count_m <- cort_merge8 %>%
+  mutate(timing_exists = ifelse(!is.na(time.decimal.fixed), 1, 0)) %>%
   group_by(IDENT_SUBID, index_wave,  index_day) %>%
-  # this will provide average cort by each wave, and time of day...
-  #aka average across 2 days if that subject has 2 days of data!
   dplyr::summarize(n_cort_samples = n(), 
+             full_timing = sum(timing_exists), 
             corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
             GROUP = mean(GROUP.n), 
             sex = mean(sex))
-nrow(cort_count_m)
-# per day, how many cort samples collected? 
-summary(cort_count_m$n_cort_samples)
-check <- subset(cort_count_m, n_cort_samples <= 3)
-nrow(check)
-length(unique(check$IDENT_SUBID))
-summary(as.factor(cort_count_m$GROUP))
+
+# visualize, 
+hist(cort_count_m$n_cort_samples)
+
+# make a table to see how many days missing 1 + samples, by group 
+cort_missing_table <- cort_count_m %>%
+  # mark days of cort with full set (4) or missing sample(s)
+  mutate(full_set = ifelse(n_cort_samples == 4 & 
+                             full_timing == 4, 1, 0)) %>%
+  group_by(full_set) %>%
+  dplyr::summarize(n_days = n())
+cort_missing_table
+total_days <- cort_missing_table$n_days[1] + cort_missing_table$n_days[2]
+prop_days_missing_samples <- cort_missing_table$n_days[cort_missing_table$full_set==0]/ total_days 
+# 21 % of diurnal datasets (days) are missing at least 1 sample or time stamp!  
+prop_days_missing_samples
+
+
+```
+
+## morning sample interval timing
+```{r}
+morning_timing <- cort_merge8 %>%
+  select(IDENT_SUBID, time.decimal.fixed, 
+         time_of_day, index4, index_day, index_wave, GROUP) %>%
+  filter(time_of_day == "waking") 
+
+morning_timing <- morning_timing %>% 
+  spread(index4, time.decimal.fixed) %>%
+  rename(morning = '1', 
+         morning45 = '2') %>%
+  mutate(time_diff = morning45 - morning) %>%
+  filter(!is.na(time_diff))
+
+#nrow(morning_timing)
+
+#hist(morning_timing$time_diff)
+  
+morning_timing_table <- morning_timing %>%
+  group_by(IDENT_SUBID, index_day, index_wave) %>%
+  # mark if longer than 45 minutes different.
+  mutate(too_long = ifelse(time_diff > 0.75, 1, 0)) %>%
+  dplyr::summarize(n_too_long = sum(too_long))
+
+nrow(morning_timing_table)
+ # 24 % of samples were too long.  
+sum(morning_timing_table$n_too_long)/nrow(morning_timing_table)
+```
+
+## correlations between day1-day2
+```{r}
+
+cort_df <- cort_merge8 %>%
+  select(IDENT_SUBID, GROUP,time_of_day, index_day, index_wave, index4,
+         cort_values_fixed_no_outliers) %>%
+  # make wide version so that day 1 and day 2 are side by side
+  spread(index_day, cort_values_fixed_no_outliers) %>%
+  rename(day1 = '-1', day2 = '1') 
+
+# morning samples correlated day1-day2
+morning1_df <- cort_df %>%
+  filter(index4 == 1)
+cor.test(morning1_df$day1, morning1_df$day2)
+
+morning2_df <- cort_df %>%
+  filter(index4 == 2)
+cor.test(morning2_df$day1, morning2_df$day2)
+
+
+# evening samples correlated day1-day2
+evening5_df <- cort_df %>%
+  filter(index4 == 3)
+cor.test(evening5_df$day1, evening5_df$day2)
+
+evening8_df <- cort_df %>%
+  filter(index4 == 4)
+cor.test(evening8_df$day1, evening8_df$day2)
+
+
+```
+
+# CONFOUND T-TESTS 
+
+## t-test table for covariates - group differences
+```{r}
+
+cort_by_sub <- cort_merge8 %>%
+  group_by(IDENT_SUBID) %>%
+  dplyr::summarize(GROUP = GROUP[1],
+                   sex = mean(sex, na.rm = T), 
+                   corrected_cort_age_yrs = mean(corrected_cort_age_yrs, na.rm = T), 
+                   batch= mean(batch, na.rm = T), 
+                   meds = mean(as.numeric(as.character(meds)), na.rm = T))
+# set up x andy variables 
+my_dataX <- data.frame(with(cort_by_sub, cbind( GROUP)))
+my_dataY <- data.frame(with(cort_by_sub, cbind(sex, corrected_cort_age_yrs, batch, meds)))
+
+# make an empty table.
+compiled_ttests <- data.frame(x = NA, y = NA, tvalue = NA, df = NA, pvalue = NA)
+
+# set up loop for making t-tests 
+# for each column in mydata...
+for (i in 1:ncol(my_dataX)){
+  print (i)
+  var1 <- my_dataX[i]
+  var1_name <- names(var1)
+     var1_test <- as.matrix(var1)
+  # get every other column in the dataframe...
+  for (j in 1:ncol(my_dataY)){
+   # print (j)
+     var2 <-my_dataY[j]
+     var2_name <- names(var2)
+     var2_test <- as.matrix(var2)
+     # run the correlation and save the p-value...
+     t_value <- t.test(var2_test ~ var1_test)[1]
+     d_f <- t.test(var2_test ~ var1_test)[2]
+     p_value <- t.test(var2_test ~ var1_test)[3]
+     # keep the p-value 
+    row <- cbind(x=var1_name, y=var2_name, tvalue = t_value, df = d_f, pvalue = p_value)
+    compiled_ttests <- rbind(compiled_ttests, row)
+
+  }
+}
+compiled_ttests$sig_level <- ifelse(compiled_ttests$pvalue < 0.001, '***', 
+                                          ifelse(compiled_ttests$pvalue < 0.01, '**',
+                                                 ifelse(compiled_ttests$pvalue < 0.05, '*', " ")))
+compiled_ttests$x <- unlist(compiled_ttests$x)
+compiled_ttests$y <- unlist(compiled_ttests$y)
+compiled_ttests$tvalue <- unlist(compiled_ttests$tvalue)
+compiled_ttests$df <- unlist(compiled_ttests$df)
+compiled_ttests$pvalue <- unlist(compiled_ttests$pvalue)
+
+compiled_ttests_cort <- compiled_ttests 
+save(compiled_ttests_cort, file = "tables/confound_variable_t-tests_with_pvalues.Rdata")
 ```
 
 # BASIC DEMOGRAPHICS ON THESE SUBS. 
@@ -199,6 +314,7 @@ head(cort_merge8$min_index20)
 Cortisol_demographic_table <- cort_merge8 %>% 
   # get only 1 row per subj
   filter((corrected_cort_age_yrs == min_age) & (index20.n == min_index20)) %>%
+  filter(!is.na(batch)) %>%
   # filter by group
   group_by(GROUP) %>%
   # get basic demo info 
@@ -248,7 +364,8 @@ cort_ave_days_m_time <- cort_merge8 %>%
             PDS_mean = mean(PDS_mean),
             corrected_cort_age_yrs = mean(corrected_cort_age_yrs), 
             GROUP.n = mean(GROUP.n), 
-            sex = mean(sex))
+            sex = mean(sex), 
+            batch = mean(batch, na.rm = T))
 summary(as.factor(cort_merge8$GROUP))
 summary(as.factor(cort_ave_days_m_time$GROUP.n))
 nrow(cort_ave_days_m_time)
@@ -257,6 +374,7 @@ nrow(test)
 cort_ave_days_m_time$GROUP <- as.factor(ifelse(cort_ave_days_m_time$GROUP.n == 0, "COMP", "PI"))
 summary(cort_ave_days_m_time$GROUP)
 cortisol_demo_table_by_wave <- cort_ave_days_m_time %>%
+  filter(!is.na(batch)) %>%
   group_by( GROUP, index_wave) %>%
   dplyr::summarize(N = n(),
             mean_age = round(mean(corrected_cort_age_yrs, na.rm = T), 2),
@@ -266,9 +384,11 @@ cortisol_demo_table_by_wave <- cort_ave_days_m_time %>%
             proportion_female = round(mean(sex), 2), 
             N_female = sum(sex))
 cortisol_demo_table_by_wave
+
 save(cortisol_demo_table_by_wave, file = "tables/Cortisol_demographic_table_by_wave.Rdata")
 cort_ave_days_m$sex <- as.factor(ifelse(cort_ave_days_m$sex == 0, "male", "female"))
 ```
+
 
 # plot raw data
 raw data plot with loess line smoothing
@@ -281,7 +401,7 @@ ggplot(cort_ave_days_m, aes(x = corrected_cort_age_yrs, y = cort_values_fixed_no
   geom_smooth() + theme_classic() +   my_colors 
 ```
 
-### make centered vars
+## make centered vars
 ```{r}
 cort_merge8$sex.centered <- cort_merge8$sex- mean(cort_merge8$sex)
 cort_merge8$index_wave.c <- as.numeric(with(cort_merge8, ifelse(index_wave == 1, -1, ifelse(index_wave == 2, 0, 3))))

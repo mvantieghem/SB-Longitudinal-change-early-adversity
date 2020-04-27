@@ -15,6 +15,9 @@ output:
     toc: yes
 ---
 
+# Notes
+- performing cortisol models for main analysis \
+- linear, quadratic, and piecewise comparisons \
 
 ```{r, warnings = F, include = F, message = F}
 source("../../0_R_analysis_setup_file.R")
@@ -98,7 +101,7 @@ return(list(w0.intercept=round(w0.intercept, digits = 5), w1.slope=round(w1.slop
 ```
 
 # load data and organize
-```{r}
+```{r, message = F, warning = F}
 load("../../../data/1_cort_data/Cortisol_Ready_to_analyze.Rdata")
 
 range(cort_merge8$corrected_cort_age_yrs)
@@ -110,8 +113,7 @@ summary(cort_merge8$time_of_day)
 
 cort_merge8$index_day.c <- as.numeric(as.character(cort_merge8$index_day))
 cort_merge8$meds.c <- as.numeric(as.character(cort_merge8$meds)) - mean(as.numeric(as.character(cort_merge8$meds)), na.rm = T)
-sum(is.na(cort_merge8$batch))
-sum(is.na(cort_merge8$cort_use))
+#sum(is.na(cort_merge8$batch))
 
 # simplifying name of cort stuff 
 cort_merge8$cort_use <- cort_merge8$cort_values_fixed_no_outliers 
@@ -121,11 +123,11 @@ data_use <- subset(cort_merge8, !is.na(cort_use) &
 
 ### make this extra summary dataset
 this is so that we can plot the raw data, but plot means across both days instead of plotting 2 days per subj (per time of day, per wave...)
-```{r}
+```{r, message = F, warning = F}
 cort_ave_days_m <- data_use %>%
   group_by(IDENT_SUBID, index_wave, time_of_day) %>%
   # this will provide average cort by each wave, and time of day...
-  #aka average across 2 days if that subject has 2 days of data!
+  # aka average across 2 days if that subject has 2 days of data!
   dplyr::summarize(n_cort_samples = n(), 
             cort_use = mean(cort_use, na.rm = T),
             PDS_mean = mean(PDS_mean),
@@ -134,15 +136,35 @@ cort_ave_days_m <- data_use %>%
             sex.centered = mean(sex.centered), 
             meds.c = mean(meds.c),
             batch.c = mean(batch.c), 
-            index_wave.c = mean(index_wave.c))
+            index_wave.c = mean(index_wave.c)) %>%
+  mutate(GROUP = as.factor(ifelse(GROUP.n == 0, "COMP", "PI")))
 
-head(cort_ave_days_m)
-cort_ave_days_m$GROUP <- as.factor(ifelse(cort_ave_days_m$GROUP.n == 0, "COMP", "PI"))
+# make a slope version 
+cort_ave_days_slope <- cort_ave_days_m %>%
+  dplyr::select(IDENT_SUBID, GROUP, GROUP.n, 
+                corrected_cort_age_yrs, cort_use, time_of_day, index_wave) %>%
+  spread(time_of_day, cort_use) %>%
+  mutate(diurnal_slope = Waking - Evening)
 ```
 
-
 # waking + evening omnibus model 
+## 0) main effects 
+
+```{r}
+
+lmer_main <- lmer(cort_use ~ 
+                           GROUP + time_of_day* corrected_cort_age_yrs  +
+                           index_wave.c + index_day.c + batch.c + 
+                    sex.centered + meds.c +
+                      (1 + index_wave.c | IDENT_SUBID), 
+                   data = data_use)
+summary(lmer_main)
+save(lmer_main, file= "model_output/full_cort_main_effects_model.Rdata")
+
+```
+
 ## 1) Linear 
+
 
 ```{r}
 
@@ -188,7 +210,8 @@ Another approach would be to wrap the call to lmer in a function that is passed 
 Reference: https://stats.stackexchange.com/questions/19772/estimating-the-break-point-in-a-broken-stick-piecewise-linear-model
 
 ### run optimizaton of breakpoint
-notes: does work with time_of_day as a random slope, but does NOT work when using index_wave as a random slope.\ allowing age slopes to vary in both groups. \
+notes: does work with time_of_day as a random slope, but does NOT work when using index_wave as a random slope.\
+allowing age slopes to vary in both groups. \
 
 ```{r, warnings = F, message = F}
 
@@ -247,12 +270,11 @@ piecewise_mod_waking_ref <- lmer(cort_use ~
                 (1 + index_wave.c | IDENT_SUBID), data = data_use)
 
 # save main model ooutput
-cort_piecewise_regular_model <-piecewise_mod_waking_ref
+cort_piecewise_regular_model <- piecewise_mod_waking_ref
 summary(cort_piecewise_regular_model)
 save(cort_piecewise_regular_model, file = "model_output/full_cort_piecewise_regular_model.Rdata")
 
 ```
-
 
 # WAKING ONLY 
 
@@ -354,20 +376,6 @@ save(lmer_piecewise_waking, file= "model_output/waking_cort_piecewise_model.Rdat
 
 ```
 
-## Calculate ICC for mixed effects
-```{r, warnings = F}
-# from empty model
-mod <- lmer(cort_use ~ (1 | IDENT_SUBID), data = waking_cort_df)
-icc(mod)
-ICC_cort <- icc(mod)[1]
-save(ICC_cort, file = "model_output/ICC_for_waking_cort.Rdata")
-
-# from full piecewise model
-icc(lmer_piecewise_waking, adjusted = TRUE)
-ICC_cort <- icc(lmer_piecewise_waking, adjusted=TRUE)[1]
-save(ICC_cort, file = "model_output/ICC_for_waking_cort_full_piecewise_model.Rdata")
-
-```
 
 ### prep for plotting
 make new dataframe for plotting fitted effects
@@ -435,10 +443,10 @@ waking_piecewise_PI_plot
 dev.off()
 
 # save to powerpoint
-ppt_test2 <- read_pptx() %>%
-  add_slide(layout = "Title and Content", master = "Office Theme") %>%
-  ph_with_vg(code = print(waking_piecewise_PI_plot)) %>%
-  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/waking_piecewise_model_plot_overlapped_CI.pptx")
+#ppt_test2 <- read_pptx() %>%
+ # add_slide(layout = "Title and Content", master = "Office Theme") %>%
+#  ph_with_vg(code = print(waking_piecewise_PI_plot)) %>%
+#  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/waking_piecewise_model_plot_overlapped_CI.pptx")
   
 ```
 
@@ -464,13 +472,13 @@ save(waking_SS_table, file = "model_output/waking_piecewise_orig_posthoc_group_d
 # age cut-offs
 PI_greater_than_comp <- waking_SS_table %>%
   filter(p.val < 0.05 & w1.slope > 0) %>%
-  summarize(min_age = min(Age), 
+  dplyr::summarize(min_age = min(Age), 
             max_age = max(Age)) %>%
   mutate(comparison = "PI > COMP")
 
 PI_smaller_than_comp <- waking_SS_table %>%
   filter(p.val < 0.05 & w1.slope < 0) %>%
-  summarize(min_age = min(Age), 
+  dplyr::summarize(min_age = min(Age), 
             max_age = max(Age)) %>%
   mutate(comparison = "PI < COMP")
 
@@ -493,10 +501,10 @@ waking_SS_plot
 dev.off()
 
 # save to powerpoint
-ppt_test2 <- read_pptx() %>%
-  add_slide(layout = "Title and Content", master = "Office Theme") %>%
-  ph_with_vg(code = print(waking_SS_plot)) %>%
-  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/waking_piecewise_model_SS_significance_plot.pptx")
+#ppt_test2 <- read_pptx() %>%
+ # add_slide(layout = "Title and Content", master = "Office Theme") %>%
+#  ph_with_vg(code = print(waking_SS_plot)) %>%
+#  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/waking_piecewise_model_SS_significance_plot.pptx")
   
 ```
 
@@ -508,10 +516,10 @@ waking_SS_plot2 <- waking_SS_plot + ylim(-20, 20)
 grid.arrange(waking_piecewise_PI_plot2, waking_SS_plot2)
 
 #SAVING TO POWERPT 
-ppt_test2 <- read_pptx() %>%
-  add_slide(layout = "Title and Content", master = "Office Theme") %>%
-  ph_with_vg(code = print(grid.arrange(waking_piecewise_PI_plot2, waking_SS_plot2))) %>%
-  print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/stacked_waking_piecewise_SS_plots.pptx")
+#ppt_test2 <- read_pptx() %>%
+ # add_slide(layout = "Title and Content", master = "Office Theme") %>%
+  #ph_with_vg(code = print(grid.arrange(waking_piecewise_PI_plot2, waking_SS_plot2))) %>%
+  #print(target = "../../../manuscript/figures_for_PNAS/powerpoint_vector_figures/orig_from_R/stacked_waking_piecewise_SS_plots.pptx")
   
 ```
 
@@ -641,4 +649,38 @@ model_comparison_evening$model <- rownames(model_comparison_evening)
 save(model_comparison_evening, file = "model_output/model_comparisons_evening.Rdata")
 
 model_comparison_evening
+```
+
+
+# Calculate ICC 
+
+## within-subject across waves 
+```{r, warnings = F}
+# from empty model
+mod <- lmer(cort_use ~ (1 | IDENT_SUBID), data = waking_cort_df)
+icc(mod)
+ICC_cort <- icc(mod)[1]
+save(ICC_cort, file = "model_output/ICC_for_waking_cort.Rdata")
+
+# from full piecewise model
+icc(lmer_piecewise_waking, adjusted = TRUE)
+ICC_cort <- icc(lmer_piecewise_waking, adjusted=TRUE)[1]
+save(ICC_cort, file = "model_output/ICC_for_waking_cort_full_piecewise_model.Rdata")
+
+```
+
+
+## within-subject across  days:s test retest reliability
+```{r, warnings = F}
+# from empty model
+mod <- lmer(cort_use ~ (1 | IDENT_SUBID), data = waking_cort_df)
+icc(mod)
+ICC_cort <- icc(mod)[1]
+save(ICC_cort, file = "model_output/ICC_for_waking_cort.Rdata")
+
+# from full piecewise model
+icc(lmer_piecewise_waking, adjusted = TRUE)
+ICC_cort <- icc(lmer_piecewise_waking, adjusted=TRUE)[1]
+save(ICC_cort, file = "model_output/ICC_for_waking_cort_full_piecewise_model.Rdata")
+
 ```
