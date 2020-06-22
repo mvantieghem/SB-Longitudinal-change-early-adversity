@@ -1,14 +1,13 @@
-### Early adversity and brain development
+## Early adversity and brain development
 
-This is the public github repository for:
+This is the public github repository for my dissertation research at Columbia University. 
 
-VanTieghem et al. (preprint). Longitudinal changes in amygdala, hippocampus and cortisol development following early caregiving adversity. 
+VanTieghem et al. (preprint). Longitudinal changes in amygdala, hippocampus and cortisol development following early caregiving adversity. https://psyarxiv.com/yp5h2/
 
-Preprint: https://psyarxiv.com/yp5h2/
 OSF project: https://osf.io/9au4v/
 Data will be available upon request.
 
-### Contents 
+## Contents 
 
 #### 1_cortisol:
 Scripts for cortisol analyses, including cleaning scripts,  manuscript analyses, and supplemental analyses. 
