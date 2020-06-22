@@ -4,12 +4,9 @@ This is the public github repeository for:
 
 VanTieghem et al. (preprint). Longitudinal changes in amygdala, hippocampus and cortisol development following early caregiving adversity. 
 
-### Preprint: 
-https://psyarxiv.com/yp5h2/
-
-### OSF project: 
-https://osf.io/9au4v/
-
+Preprint: https://psyarxiv.com/yp5h2/
+OSF project: https://osf.io/9au4v/
+Data will be available upon request.
 
 ## Contents 
 
@@ -25,4 +22,4 @@ Includes cleaning script to prep data, and modeling script to run cross-lagged a
 Scripts for models predicting symptom outcomes from cortisol and brain data for manuscript.
 
 
-Data will be available upon request.
+
