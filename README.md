@@ -15,8 +15,8 @@ Scripts for cortisol analyses, including cleaning scripts,  manuscript analyses,
 Scripts for structural brain volume analyses, including cleaning, manuscript analyses, and supplemental analyses. 
 #### 3_combining_all_data:
 Scripts to join the cortisol and structural brain volume together into single longitudinal database.
-#### 4_cross_lag_cort_brain: Scripts for SES analyses with longitudinal cortisol and brain data. 
-Includes cleaning script to prep data, and modeling script to run cross-lagged autoregressive SES models for manuscript and supplement.
+#### 4_cross_lag_cort_brain: 
+Scripts for SES analyses with longitudinal cortisol and brain data.  Includes cleaning script to prep data, and modeling script to run cross-lagged autoregressive SES models for manuscript and supplement.
 #### 5_mixed_effects_symptoms: 
 Scripts for models predicting symptom outcomes from cortisol and brain data for manuscript.
 
