@@ -2,9 +2,10 @@
 
 This is the public github repository for my dissertation research at Columbia University. 
 
-VanTieghem et al. (preprint). Longitudinal changes in amygdala, hippocampus and cortisol development following early caregiving adversity. https://psyarxiv.com/yp5h2/
+VanTieghem et al. (preprint). Longitudinal changes in amygdala, hippocampus and cortisol development following early caregiving adversity. 
 
-OSF project: https://osf.io/9au4v/
+Preprint: https://psyarxiv.com/yp5h2/
+OSF project: https://osf.io/9au4v/ \
 Data will be available upon request.
 
 ## Contents 
